@@ -1,0 +1,22 @@
+{
+  "name": "opsly-api",
+  "version": "1.0.0",
+  "main": "src/server.ts",
+  "scripts": {
+    "start": "ts-node src/server.ts",
+    "dev": "tsx src/server.ts",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "zod": "^3.11.6"
+  },
+  "devDependencies": {
+    "typescript": "^4.5.4",
+    "ts-node": "^10.4.0",
+    "tsx": "^3.12.0",
+    "vitest": "^0.0.112",
+    "supertest": "^6.1.6"
+  },
+  "type": "module"
+}
