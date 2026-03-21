@@ -5,8 +5,8 @@ coverage/
 .env
 .env.*
 !.env.example
-*.log
-.pnpm-store/
 .vscode/
+.pnpm-store/
+*.log
 .DS_Store
 Thumbs.db

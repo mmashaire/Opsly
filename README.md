@@ -26,30 +26,19 @@ Implemented so far:
 - pnpm workspace monorepo
 - `apps/api` Express + TypeScript backend
 - `packages/shared` shared TypeScript package
-- health endpoint
-- initial item domain
-- validation with Zod
-- in-memory data layer
-- basic integration testing with Vitest and Supertest
+- basic health endpoint
+- early domain structure for inventory-related backend work
+- initial test coverage with Vitest and Supertest
 
-## Architecture
-
-Current API structure:
+## Current Repository Structure
 
 ```text
 apps/api/src
-├── domain
 ├── data
-├── routes
-├── app.ts
+├── domain
+├── index.ts
 └── server.ts
 ```
-
-This separation is intentional:
-
-- `domain/` contains business logic
-- `data/` contains storage concerns
-- `routes/` contains HTTP layer concerns
 
 ## Product Direction
 
@@ -69,7 +58,6 @@ Opsly is evolving into an internal operations backend for warehouse and inventor
 - Node.js
 - Express
 - pnpm workspaces
-- Zod
 - Vitest
 - Supertest
 
@@ -95,7 +83,7 @@ pnpm --filter api run test
 
 ## Near-Term Goals
 
-- add `GET /items/:id`
+- expand item endpoints
 - improve error handling and API response consistency
 - introduce repository interfaces
 - add stock movement rules
