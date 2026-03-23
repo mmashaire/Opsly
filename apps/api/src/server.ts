@@ -1,13 +1,10 @@
-import express from 'express';
+import { createApp } from "./index";
 
-export function createApp() {
-  const app = express();
+const DEFAULT_PORT = 3000;
 
-  app.use(express.json({ limit: '1mb' }));
+const app = createApp();
+const port = Number(process.env.PORT) || DEFAULT_PORT;
 
-  app.get('/health', (_req, res) => {
-    res.json({ ok: true });
-  });
-
-  return app;
-}
+app.listen(port, () => {
+  console.log(`Opsly API is running on http://localhost:${port}`);
+});

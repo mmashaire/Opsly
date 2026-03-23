@@ -1,56 +1,41 @@
 # Opsly
 
-Opsly is a backend-first TypeScript monorepo for a realistic **Warehouse / Inventory Operations** system.
+Opsly is a backend-first TypeScript monorepo for a realistic warehouse and inventory operations system.
 
-The project is being built as a portfolio piece to demonstrate practical software engineering ability through a structured backend codebase rather than toy examples.
+The goal is to model day-to-day warehouse workflows in software with clear business rules, predictable behavior, and practical engineering choices.
 
-## Purpose
+## What Is Implemented
 
-Opsly exists to showcase:
+Current backend capabilities include:
 
-- backend engineering skills
-- TypeScript proficiency
-- monorepo/workspace setup
-- API design
-- validation and type safety
-- testing
-- maintainable project structure
-- step-by-step engineering growth
+- Item catalog basics: create, list, fetch by id
+- Stock adjustments with reason codes and guardrails
+- Inbound receipts (stock increases)
+- Outbound picks (stock decreases)
+- Per-item movement history
+- Low-stock alerts using per-item reorder thresholds
+- Reorder-threshold updates without recreating items
+- Request tracing with `x-request-id`
+- Structured request logging (including role + auth source metadata)
+- Role-based authorization on write endpoints (`admin` required)
+- Bearer-token role resolution (`admin` / `viewer`) with header fallback
+- Optional persistence backend toggle: in-memory or PostgreSQL
 
-The aim is to make the repository credible to recruiters, hiring managers, and engineers reviewing it for software engineering or IT roles.
-
-## Current State
-
-Implemented so far:
-
-- pnpm workspace monorepo
-- `apps/api` Express + TypeScript backend
-- `packages/shared` shared TypeScript package
-- basic health endpoint
-- early domain structure for inventory-related backend work
-- initial test coverage with Vitest and Supertest
-
-## Current Repository Structure
+## Project Structure
 
 ```text
-apps/api/src
-├── data
-├── domain
-├── index.ts
-└── server.ts
+apps/
+	api/
+		src/
+			data/
+			domain/
+			middleware/
+			index.ts
+			server.ts
+		test/
+packages/
+	shared/
 ```
-
-## Product Direction
-
-Opsly is evolving into an internal operations backend for warehouse and inventory management, with future support for:
-
-- items and stock management
-- stock movements
-- user roles and permissions
-- workflow/task handling
-- audit logging
-- repository abstractions
-- database persistence
 
 ## Tech Stack
 
@@ -58,10 +43,12 @@ Opsly is evolving into an internal operations backend for warehouse and inventor
 - Node.js
 - Express
 - pnpm workspaces
+- PostgreSQL (optional backend)
+- Zod
 - Vitest
 - Supertest
 
-## Running the Project
+## Run Locally
 
 Install dependencies:
 
@@ -69,7 +56,7 @@ Install dependencies:
 pnpm install
 ```
 
-Run the API:
+Run API (default in-memory mode):
 
 ```powershell
 pnpm --filter api run dev
@@ -81,21 +68,38 @@ Run tests:
 pnpm --filter api run test
 ```
 
-## Near-Term Goals
+## Optional: PostgreSQL Backend
 
-- expand item endpoints
-- improve error handling and API response consistency
-- introduce repository interfaces
-- add stock movement rules
-- expand test coverage
-- improve repo hygiene and developer experience
+Set environment variables before running the API:
 
-## Why This Matters
+```powershell
+$env:OPSLY_DATA_BACKEND="postgres"
+$env:DATABASE_URL="postgres://user:password@localhost:5432/opsly"
+pnpm --filter api run dev
+```
 
-This project is intended to show the ability to:
+If `OPSLY_DATA_BACKEND` is unset (or set to `memory`), Opsly uses in-memory persistence.
 
-- build a real backend foundation
-- troubleshoot TypeScript and workspace issues
-- structure code cleanly
-- make practical engineering tradeoffs
-- grow a codebase deliberately
+## Optional: Bearer Token Auth
+
+Configure tokens:
+
+```powershell
+$env:OPSLY_ADMIN_TOKEN="opsly-admin-dev-token"
+$env:OPSLY_VIEWER_TOKEN="opsly-viewer-dev-token"
+```
+
+Write endpoints require an admin role. Example header:
+
+```text
+Authorization: Bearer <admin-token>
+```
+
+## Current Focus
+
+Next backend priorities:
+
+- Add audit-event records for stock-changing operations
+- Improve repository boundaries for cleaner persistence implementations
+- Expand test depth around persistence and auth edge cases
+- Add CI checks for lint/test/build

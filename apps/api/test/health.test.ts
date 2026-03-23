@@ -1,13 +1,25 @@
-import request from 'supertest';
-import { describe, it, expect } from 'vitest';
-import { createApp } from '../src/server.js';
+import request from "supertest";
+import { describe, expect, it } from "vitest";
+import { createApp } from "../src/index";
 
-describe('GET /health', () => {
-  it('returns ok', async () => {
+describe("GET /health", () => {
+  it("returns ok", async () => {
     const app = createApp();
-    const res = await request(app).get('/health');
 
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
+    const response = await request(app).get("/health");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: "ok" });
+    expect(response.headers["x-request-id"]).toBeTypeOf("string");
+    expect(response.headers["x-request-id"].length).toBeGreaterThan(0);
+  });
+
+  it("uses incoming x-request-id when provided", async () => {
+    const app = createApp();
+
+    const response = await request(app).get("/health").set("x-request-id", "req-123");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["x-request-id"]).toBe("req-123");
   });
 });
