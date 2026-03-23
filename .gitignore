@@ -10,3 +10,7 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+
+# Local Copilot/agent instruction files
+.github/copilot-instructions.md
+**/copilot-instructions.md
