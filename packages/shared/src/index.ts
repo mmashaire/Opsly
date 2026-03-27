@@ -65,3 +65,68 @@ export interface StockMovement {
   orderReference?: string;
   createdAt: string;
 }
+
+export interface InventoryInvestigationItemSummary {
+  itemId: string;
+  sku: string;
+  name: string;
+  currentQuantityOnHand: number;
+  adjustmentCount: number;
+  negativeAdjustmentCount: number;
+  reasonCodeBreakdown: Partial<Record<AdjustmentReasonCode, number>>;
+  totalAbsoluteAdjustmentDelta: number;
+  investigationScore: number;
+  latestAdjustmentAt: string;
+}
+
+export interface InventoryInvestigationSummary {
+  generatedAt: string;
+  periodDays: number;
+  minimumAdjustmentCount: number;
+  items: InventoryInvestigationItemSummary[];
+}
+
+export interface OperationsDashboardSummary {
+  generatedAt: string;
+  periodDays: number;
+  minimumAdjustmentCount: number;
+  inventory: {
+    totalItems: number;
+    totalQuantityOnHand: number;
+    lowStockItemCount: number;
+    outOfStockItemCount: number;
+  };
+  activity: {
+    receiptMovementCount: number;
+    pickMovementCount: number;
+    adjustmentMovementCount: number;
+    unitsReceived: number;
+    unitsPicked: number;
+    netStockChange: number;
+  };
+  investigation: {
+    candidateItemCount: number;
+  };
+}
+
+export interface ItemAuditEvent {
+  id: string;
+  itemId: ItemId;
+  eventType: "CREATED" | "STOCK_MODIFIED" | "REORDER_THRESHOLD_UPDATED";
+  delta?: number;
+  quantityBefore?: number;
+  quantityAfter?: number;
+  reasonCode?: AdjustmentReasonCode;
+  note?: string;
+  performedBy?: string;
+  createdAt: string;
+}
+
+export interface ItemAuditResponse {
+  itemId: ItemId;
+  limit: number;
+  before?: string;
+  hasMore: boolean;
+  nextBefore?: string;
+  events: ItemAuditEvent[];
+}

@@ -5,6 +5,9 @@ import type {
   CreateStockAdjustmentInput,
   CreateStockReceiptInput,
   Item,
+  InventoryInvestigationSummary,
+  InventoryInvestigationItemSummary,
+  OperationsDashboardSummary,
   StockMovement,
 } from "@opsly/shared";
 import {
@@ -95,43 +98,43 @@ async function applyStockMovement(input: {
 }> {
   const item = await getItemRecordById(input.itemId);
 
-    if (!item) {
-      throw new Error("Item not found.");
-    }
+  if (!item) {
+    throw new Error("Item not found.");
+  }
 
-    const quantityBefore = item.quantityOnHand;
-    const quantityAfter = quantityBefore + input.delta;
+  const quantityBefore = item.quantityOnHand;
+  const quantityAfter = quantityBefore + input.delta;
 
-    if (quantityAfter < 0) {
-      throw new Error(input.underflowErrorMessage ?? "Stock movement would reduce stock below zero.");
-    }
+  if (quantityAfter < 0) {
+    throw new Error(input.underflowErrorMessage ?? "Stock movement would reduce stock below zero.");
+  }
 
-    const updatedItem = await updateItemQuantityRecord(item.id, quantityAfter);
+  const updatedItem = await updateItemQuantityRecord(item.id, quantityAfter);
 
-    if (!updatedItem) {
-      throw new Error("Item not found.");
-    }
+  if (!updatedItem) {
+    throw new Error("Item not found.");
+  }
 
-    const movement = await addMovementRecord({
-      id: randomUUID(),
-      itemId: item.id,
-      type: input.type,
-      delta: input.delta,
-      quantityBefore,
-      quantityAfter,
-      ...(input.reasonCode === undefined ? {} : { reasonCode: input.reasonCode }),
-      ...(input.note === undefined ? {} : { note: normalizeOptionalText(input.note, "note") }),
-      ...(input.performedBy === undefined
-        ? {}
-        : { performedBy: normalizeOptionalText(input.performedBy, "performedBy") }),
-      ...(input.supplierReference === undefined
-        ? {}
-        : { supplierReference: normalizeOptionalText(input.supplierReference, "supplierReference") }),
-      ...(input.orderReference === undefined
-        ? {}
-        : { orderReference: normalizeOptionalText(input.orderReference, "orderReference") }),
-      createdAt: new Date().toISOString(),
-    });
+  const movement = await addMovementRecord({
+    id: randomUUID(),
+    itemId: item.id,
+    type: input.type,
+    delta: input.delta,
+    quantityBefore,
+    quantityAfter,
+    ...(input.reasonCode === undefined ? {} : { reasonCode: input.reasonCode }),
+    ...(input.note === undefined ? {} : { note: normalizeOptionalText(input.note, "note") }),
+    ...(input.performedBy === undefined
+      ? {}
+      : { performedBy: normalizeOptionalText(input.performedBy, "performedBy") }),
+    ...(input.supplierReference === undefined
+      ? {}
+      : { supplierReference: normalizeOptionalText(input.supplierReference, "supplierReference") }),
+    ...(input.orderReference === undefined
+      ? {}
+      : { orderReference: normalizeOptionalText(input.orderReference, "orderReference") }),
+    createdAt: new Date().toISOString(),
+  });
 
   return {
     item: updatedItem,
@@ -169,6 +172,216 @@ export async function findItemById(itemId: string): Promise<Item | undefined> {
 
 export async function listItemMovements(itemId: string): Promise<StockMovement[]> {
   return listMovementRecordsByItemId(itemId);
+}
+
+export async function listItemAuditEvents(
+  itemId: string,
+  options: {
+    limit: number;
+    before?: string;
+  },
+): Promise<StockMovement[]> {
+  const movements = await listMovementRecordsByItemId(itemId);
+  const sortedByNewestFirst = [...movements].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt),
+  );
+  const cursor = options.before;
+  const filteredByCursor =
+    cursor === undefined
+      ? sortedByNewestFirst
+      : sortedByNewestFirst.filter((movement) => movement.createdAt < cursor);
+
+  return filteredByCursor.slice(0, options.limit);
+}
+
+export async function getInventoryInvestigationSummary(input: {
+  periodDays: number;
+  minimumAdjustmentCount: number;
+  itemId?: string;
+  reasonCode?: NonNullable<StockMovement["reasonCode"]>;
+  minInvestigationScore?: number;
+}): Promise<InventoryInvestigationSummary> {
+  const now = Date.now();
+  const periodStart = now - input.periodDays * 24 * 60 * 60 * 1000;
+  const items = await listItemRecords();
+  const summaries: InventoryInvestigationItemSummary[] = [];
+
+  for (const item of items) {
+    const movements = await listMovementRecordsByItemId(item.id);
+    const recentAdjustments = movements.filter((movement) => {
+      if (movement.type !== "ADJUSTMENT") {
+        return false;
+      }
+
+      if (input.reasonCode && movement.reasonCode !== input.reasonCode) {
+        return false;
+      }
+
+      const createdAtTime = Date.parse(movement.createdAt);
+
+      if (Number.isNaN(createdAtTime)) {
+        return false;
+      }
+
+      return createdAtTime >= periodStart;
+    });
+
+    if (input.itemId && item.id !== input.itemId) {
+      continue;
+    }
+
+    if (recentAdjustments.length < input.minimumAdjustmentCount) {
+      continue;
+    }
+
+    const negativeAdjustmentCount = recentAdjustments.filter(
+      (movement) => movement.delta < 0,
+    ).length;
+    const reasonCodeBreakdown: Partial<Record<NonNullable<StockMovement["reasonCode"]>, number>> =
+      {};
+
+    for (const adjustment of recentAdjustments) {
+      if (!adjustment.reasonCode) {
+        continue;
+      }
+
+      const currentCount = reasonCodeBreakdown[adjustment.reasonCode] ?? 0;
+      reasonCodeBreakdown[adjustment.reasonCode] = currentCount + 1;
+    }
+
+    const totalAbsoluteAdjustmentDelta = recentAdjustments.reduce(
+      (sum, movement) => sum + Math.abs(movement.delta),
+      0,
+    );
+    const latestAdjustmentAt = recentAdjustments
+      .map((movement) => movement.createdAt)
+      .sort((left, right) => right.localeCompare(left))[0];
+
+    const investigationScore = negativeAdjustmentCount * 2 + totalAbsoluteAdjustmentDelta;
+
+    if (
+      input.minInvestigationScore !== undefined &&
+      investigationScore < input.minInvestigationScore
+    ) {
+      continue;
+    }
+
+    summaries.push({
+      itemId: item.id,
+      sku: item.sku,
+      name: item.name,
+      currentQuantityOnHand: item.quantityOnHand,
+      adjustmentCount: recentAdjustments.length,
+      negativeAdjustmentCount,
+      reasonCodeBreakdown,
+      totalAbsoluteAdjustmentDelta,
+      investigationScore,
+      latestAdjustmentAt,
+    });
+  }
+
+  summaries.sort((left, right) => {
+    if (right.investigationScore !== left.investigationScore) {
+      return right.investigationScore - left.investigationScore;
+    }
+
+    return right.latestAdjustmentAt.localeCompare(left.latestAdjustmentAt);
+  });
+
+  return {
+    generatedAt: new Date(now).toISOString(),
+    periodDays: input.periodDays,
+    minimumAdjustmentCount: input.minimumAdjustmentCount,
+    items: summaries,
+  };
+}
+
+export async function getOperationsDashboardSummary(input: {
+  periodDays: number;
+  minimumAdjustmentCount: number;
+}): Promise<OperationsDashboardSummary> {
+  const now = Date.now();
+  const periodStart = now - input.periodDays * 24 * 60 * 60 * 1000;
+  const items = await listItemRecords();
+
+  let totalQuantityOnHand = 0;
+  let lowStockItemCount = 0;
+  let outOfStockItemCount = 0;
+
+  for (const item of items) {
+    totalQuantityOnHand += item.quantityOnHand;
+
+    if (item.quantityOnHand === 0) {
+      outOfStockItemCount += 1;
+    }
+
+    if (item.reorderThreshold !== undefined && item.quantityOnHand <= item.reorderThreshold) {
+      lowStockItemCount += 1;
+    }
+  }
+
+  let receiptMovementCount = 0;
+  let pickMovementCount = 0;
+  let adjustmentMovementCount = 0;
+  let unitsReceived = 0;
+  let unitsPicked = 0;
+  let netStockChange = 0;
+
+  for (const item of items) {
+    const movements = await listMovementRecordsByItemId(item.id);
+
+    for (const movement of movements) {
+      const movementCreatedAt = Date.parse(movement.createdAt);
+
+      if (Number.isNaN(movementCreatedAt) || movementCreatedAt < periodStart) {
+        continue;
+      }
+
+      netStockChange += movement.delta;
+
+      if (movement.type === "RECEIPT") {
+        receiptMovementCount += 1;
+        unitsReceived += movement.delta;
+      }
+
+      if (movement.type === "PICK") {
+        pickMovementCount += 1;
+        unitsPicked += Math.abs(movement.delta);
+      }
+
+      if (movement.type === "ADJUSTMENT") {
+        adjustmentMovementCount += 1;
+      }
+    }
+  }
+
+  const investigationSummary = await getInventoryInvestigationSummary({
+    periodDays: input.periodDays,
+    minimumAdjustmentCount: input.minimumAdjustmentCount,
+  });
+
+  return {
+    generatedAt: new Date(now).toISOString(),
+    periodDays: input.periodDays,
+    minimumAdjustmentCount: input.minimumAdjustmentCount,
+    inventory: {
+      totalItems: items.length,
+      totalQuantityOnHand,
+      lowStockItemCount,
+      outOfStockItemCount,
+    },
+    activity: {
+      receiptMovementCount,
+      pickMovementCount,
+      adjustmentMovementCount,
+      unitsReceived,
+      unitsPicked,
+      netStockChange,
+    },
+    investigation: {
+      candidateItemCount: investigationSummary.items.length,
+    },
+  };
 }
 
 export async function adjustItemStock(input: CreateStockAdjustmentInput): Promise<{

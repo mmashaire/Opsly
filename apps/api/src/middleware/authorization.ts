@@ -6,6 +6,26 @@ const allowedRoles = new Set<Role>(["admin", "viewer"]);
 const DEFAULT_ADMIN_TOKEN = "opsly-admin-dev-token";
 const DEFAULT_VIEWER_TOKEN = "opsly-viewer-dev-token";
 
+type AuthMode = "bearer-only" | "role-header";
+
+function getAuthMode(): AuthMode {
+  const configuredMode = process.env.OPSLY_AUTH_MODE?.trim().toLowerCase();
+
+  if (configuredMode === "role-header") {
+    return "role-header";
+  }
+
+  if (configuredMode === "bearer-only") {
+    return "bearer-only";
+  }
+
+  if (process.env.NODE_ENV === "test") {
+    return "role-header";
+  }
+
+  return "bearer-only";
+}
+
 function getConfiguredTokenRole(token: string): Role | undefined {
   const adminToken = process.env.OPSLY_ADMIN_TOKEN || DEFAULT_ADMIN_TOKEN;
   const viewerToken = process.env.OPSLY_VIEWER_TOKEN || DEFAULT_VIEWER_TOKEN;
@@ -21,10 +41,9 @@ function getConfiguredTokenRole(token: string): Role | undefined {
   return undefined;
 }
 
-function getRoleFromBearerToken(request: Request):
-  | { role: Role }
-  | { error: { code: string; message: string } }
-  | undefined {
+function getRoleFromBearerToken(
+  request: Request,
+): { role: Role } | { error: { code: string; message: string } } | undefined {
   const authorizationHeader = request.header("authorization")?.trim();
 
   if (!authorizationHeader) {
@@ -73,7 +92,12 @@ function getRoleFromHeader(request: Request): Role | undefined {
 
 type AuthSource = "bearer" | "header" | "default";
 
-export function resolveRoleMiddleware(request: Request, response: Response, next: NextFunction): void {
+export function resolveRoleMiddleware(
+  request: Request,
+  response: Response,
+  next: NextFunction,
+): void {
+  const authMode = getAuthMode();
   const roleFromToken = getRoleFromBearerToken(request);
 
   if (roleFromToken && "error" in roleFromToken) {
@@ -83,7 +107,22 @@ export function resolveRoleMiddleware(request: Request, response: Response, next
 
   const roleHeader = request.header("x-opsly-role")?.trim().toLowerCase();
 
-  if (!roleFromToken && roleHeader && !allowedRoles.has(roleHeader as Role)) {
+  if (authMode === "bearer-only" && roleHeader) {
+    response.status(400).json({
+      error: {
+        code: "AUTH_MODE_RESTRICTS_ROLE_HEADER",
+        message: "x-opsly-role is disabled in bearer-only mode.",
+      },
+    });
+    return;
+  }
+
+  if (
+    authMode === "role-header" &&
+    !roleFromToken &&
+    roleHeader &&
+    !allowedRoles.has(roleHeader as Role)
+  ) {
     response.status(400).json({
       error: {
         code: "INVALID_ROLE",
@@ -93,18 +132,15 @@ export function resolveRoleMiddleware(request: Request, response: Response, next
     return;
   }
 
-  const roleFromHeader = getRoleFromHeader(request);
+  const roleFromHeader = authMode === "role-header" ? getRoleFromHeader(request) : undefined;
 
   const resolvedRole =
-    (roleFromToken && "role" in roleFromToken ? roleFromToken.role : undefined)
-    ?? roleFromHeader
-    ?? "viewer";
+    (roleFromToken && "role" in roleFromToken ? roleFromToken.role : undefined) ??
+    roleFromHeader ??
+    "viewer";
 
-  const authSource: AuthSource = roleFromToken && "role" in roleFromToken
-    ? "bearer"
-    : roleFromHeader
-      ? "header"
-      : "default";
+  const authSource: AuthSource =
+    roleFromToken && "role" in roleFromToken ? "bearer" : roleFromHeader ? "header" : "default";
 
   response.locals.role = resolvedRole;
   response.locals.authSource = authSource;
