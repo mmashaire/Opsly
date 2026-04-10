@@ -3,9 +3,6 @@ import type { Role } from "@opsly/shared";
 
 const allowedRoles = new Set<Role>(["admin", "viewer"]);
 
-const DEFAULT_ADMIN_TOKEN = "opsly-admin-dev-token";
-const DEFAULT_VIEWER_TOKEN = "opsly-viewer-dev-token";
-
 type AuthMode = "bearer-only" | "role-header";
 
 function getAuthMode(): AuthMode {
@@ -27,14 +24,14 @@ function getAuthMode(): AuthMode {
 }
 
 function getConfiguredTokenRole(token: string): Role | undefined {
-  const adminToken = process.env.OPSLY_ADMIN_TOKEN || DEFAULT_ADMIN_TOKEN;
-  const viewerToken = process.env.OPSLY_VIEWER_TOKEN || DEFAULT_VIEWER_TOKEN;
+  const adminToken = process.env.OPSLY_ADMIN_TOKEN?.trim();
+  const viewerToken = process.env.OPSLY_VIEWER_TOKEN?.trim();
 
-  if (token === adminToken) {
+  if (adminToken && token === adminToken) {
     return "admin";
   }
 
-  if (token === viewerToken) {
+  if (viewerToken && token === viewerToken) {
     return "viewer";
   }
 

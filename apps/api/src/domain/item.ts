@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type {
   CreateItemInput,
+  CreateCycleCountInput,
   CreateStockPickInput,
   CreateStockAdjustmentInput,
   CreateStockReceiptInput,
+  CycleCountResult,
   Item,
   InventoryInvestigationSummary,
   InventoryInvestigationItemSummary,
@@ -19,6 +21,13 @@ import {
   updateItemQuantityRecord,
   updateItemReorderThresholdRecord,
 } from "../data/store";
+
+const AUDIT_CURSOR_SEPARATOR = "::";
+
+type ItemAuditCursor = {
+  createdAt: string;
+  id?: string;
+};
 
 function normalizeRequiredText(value: string, fieldName: string): string {
   const normalizedValue = value.trim();
@@ -174,6 +183,67 @@ export async function listItemMovements(itemId: string): Promise<StockMovement[]
   return listMovementRecordsByItemId(itemId);
 }
 
+function compareAuditEventsNewestFirst(left: StockMovement, right: StockMovement): number {
+  const createdAtCompare = right.createdAt.localeCompare(left.createdAt);
+
+  if (createdAtCompare !== 0) {
+    return createdAtCompare;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
+export function parseItemAuditCursor(cursor: string): ItemAuditCursor | undefined {
+  const normalizedCursor = cursor.trim();
+
+  if (!normalizedCursor) {
+    return undefined;
+  }
+
+  if (normalizedCursor.includes(AUDIT_CURSOR_SEPARATOR)) {
+    const [createdAt, id, ...rest] = normalizedCursor.split(AUDIT_CURSOR_SEPARATOR);
+
+    if (!createdAt || !id || rest.length > 0 || Number.isNaN(Date.parse(createdAt))) {
+      return undefined;
+    }
+
+    return {
+      createdAt: new Date(createdAt).toISOString(),
+      id,
+    };
+  }
+
+  if (Number.isNaN(Date.parse(normalizedCursor))) {
+    return undefined;
+  }
+
+  return {
+    createdAt: new Date(normalizedCursor).toISOString(),
+  };
+}
+
+export function createItemAuditCursor(event: Pick<StockMovement, "createdAt" | "id">): string {
+  return `${event.createdAt}${AUDIT_CURSOR_SEPARATOR}${event.id}`;
+}
+
+function isEventBeforeCursor(event: StockMovement, cursor: ItemAuditCursor): boolean {
+  const createdAtCompare = event.createdAt.localeCompare(cursor.createdAt);
+
+  if (createdAtCompare < 0) {
+    return true;
+  }
+
+  if (createdAtCompare > 0) {
+    return false;
+  }
+
+  if (cursor.id === undefined) {
+    return false;
+  }
+
+  return event.id.localeCompare(cursor.id) < 0;
+}
+
 export async function listItemAuditEvents(
   itemId: string,
   options: {
@@ -182,14 +252,12 @@ export async function listItemAuditEvents(
   },
 ): Promise<StockMovement[]> {
   const movements = await listMovementRecordsByItemId(itemId);
-  const sortedByNewestFirst = [...movements].sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt),
-  );
-  const cursor = options.before;
+  const sortedByNewestFirst = [...movements].sort(compareAuditEventsNewestFirst);
+  const cursor = options.before === undefined ? undefined : parseItemAuditCursor(options.before);
   const filteredByCursor =
     cursor === undefined
       ? sortedByNewestFirst
-      : sortedByNewestFirst.filter((movement) => movement.createdAt < cursor);
+      : sortedByNewestFirst.filter((movement) => isEventBeforeCursor(movement, cursor));
 
   return filteredByCursor.slice(0, options.limit);
 }
@@ -426,6 +494,56 @@ export async function pickItemStock(input: CreateStockPickInput): Promise<{
     orderReference: input.orderReference,
     underflowErrorMessage: "Pick would reduce stock below zero.",
   });
+}
+
+export async function conductCycleCount(input: CreateCycleCountInput): Promise<CycleCountResult> {
+  const countedQuantity = input.countedQuantity;
+
+  if (!Number.isInteger(countedQuantity) || countedQuantity < 0) {
+    throw new Error("countedQuantity must be a non-negative integer.");
+  }
+
+  const item = await getItemRecordById(input.itemId);
+
+  if (!item) {
+    throw new Error("Item not found.");
+  }
+
+  const previousQuantity = item.quantityOnHand;
+  const delta = countedQuantity - previousQuantity;
+
+  // Update stock to match the physical count. Even when delta is zero we still
+  // write a movement record so the audit trail confirms the count was performed.
+  const updatedItem = await updateItemQuantityRecord(item.id, countedQuantity);
+
+  if (!updatedItem) {
+    throw new Error("Item not found.");
+  }
+
+  const movement = await addMovementRecord({
+    id: randomUUID(),
+    itemId: item.id,
+    type: "ADJUSTMENT",
+    delta,
+    quantityBefore: previousQuantity,
+    quantityAfter: countedQuantity,
+    reasonCode: "CYCLE_COUNT",
+    ...(input.note === undefined ? {} : { note: normalizeOptionalText(input.note, "note") }),
+    ...(input.performedBy === undefined
+      ? {}
+      : { performedBy: normalizeOptionalText(input.performedBy, "performedBy") }),
+    createdAt: new Date().toISOString(),
+  });
+
+  return {
+    item: updatedItem,
+    movement,
+    variance: {
+      delta,
+      countedQuantity,
+      previousQuantity,
+    },
+  };
 }
 
 export async function updateItemReorderThreshold(

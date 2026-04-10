@@ -1,10 +1,13 @@
 import express from "express";
 import { z } from "zod";
+import { DUPLICATE_SKU_ERROR_MESSAGE } from "./data/store";
 import { requireAdminRole, resolveRoleMiddleware } from "./middleware/authorization";
 import { corsMiddleware } from "./middleware/cors";
 import { requestContextMiddleware } from "./middleware/requestContext";
 import {
   adjustItemStock,
+  createItemAuditCursor,
+  conductCycleCount,
   createItem,
   findItemById,
   getInventoryInvestigationSummary,
@@ -12,6 +15,7 @@ import {
   listItemAuditEvents,
   listLowStockItems,
   listItemMovements,
+  parseItemAuditCursor,
   listItems,
   pickItemStock,
   receiveItemStock,
@@ -63,6 +67,12 @@ const updateItemSchema = z.object({
   reorderThreshold: z.number().int().nonnegative().nullable(),
 });
 
+const cycleCountSchema = z.object({
+  countedQuantity: z.number().int().nonnegative(),
+  note: z.string().min(1).optional(),
+  performedBy: z.string().min(1).optional(),
+});
+
 const inventoryInvestigationQuerySchema = z.object({
   periodDays: z.coerce.number().int().positive().max(365).default(30),
   minimumAdjustmentCount: z.coerce.number().int().positive().max(100).default(2),
@@ -73,7 +83,7 @@ const inventoryInvestigationQuerySchema = z.object({
 
 const itemAuditQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(20),
-  before: z.string().datetime().optional(),
+  before: z.string().trim().min(1).optional(),
 });
 
 const operationsDashboardQuerySchema = z.object({
@@ -89,6 +99,39 @@ function parseItemIdParam(value: unknown): string | undefined {
   const itemId = value.trim();
 
   return itemId ? itemId : undefined;
+}
+
+function toItemAuditEvent(event: {
+  id: string;
+  itemId: string;
+  type: "ADJUSTMENT" | "RECEIPT" | "PICK";
+  delta: number;
+  quantityBefore: number;
+  quantityAfter: number;
+  reasonCode?: "CYCLE_COUNT" | "DAMAGE" | "MANUAL_CORRECTION" | "RECEIVING_CORRECTION";
+  note?: string;
+  performedBy?: string;
+  supplierReference?: string;
+  orderReference?: string;
+  createdAt: string;
+}) {
+  return {
+    id: event.id,
+    itemId: event.itemId,
+    eventType: "STOCK_MODIFIED",
+    movementType: event.type,
+    delta: event.delta,
+    quantityBefore: event.quantityBefore,
+    quantityAfter: event.quantityAfter,
+    ...(event.reasonCode === undefined ? {} : { reasonCode: event.reasonCode }),
+    ...(event.note === undefined ? {} : { note: event.note }),
+    ...(event.performedBy === undefined ? {} : { performedBy: event.performedBy }),
+    ...(event.supplierReference === undefined
+      ? {}
+      : { supplierReference: event.supplierReference }),
+    ...(event.orderReference === undefined ? {} : { orderReference: event.orderReference }),
+    createdAt: event.createdAt,
+  };
 }
 
 export function createApp() {
@@ -222,6 +265,15 @@ export function createApp() {
 
       return response.status(201).json(item);
     } catch (error) {
+      if (error instanceof Error && error.message === DUPLICATE_SKU_ERROR_MESSAGE) {
+        return response.status(409).json({
+          error: {
+            code: "DUPLICATE_SKU",
+            message: error.message,
+          },
+        });
+      }
+
       return response.status(400).json({
         error: {
           code: "INVALID_ITEM",
@@ -396,13 +448,36 @@ export function createApp() {
       });
     }
 
+    if (
+      parseResult.data.before !== undefined &&
+      parseItemAuditCursor(parseResult.data.before) === undefined
+    ) {
+      return response.status(400).json({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Invalid item audit query.",
+          details: {
+            formErrors: [],
+            fieldErrors: {
+              before: ["before must be a valid audit cursor."],
+            },
+          },
+        },
+      });
+    }
+
     const eventsWithProbe = await listItemAuditEvents(item.id, {
       limit: parseResult.data.limit + 1,
       ...(parseResult.data.before === undefined ? {} : { before: parseResult.data.before }),
     });
     const hasMore = eventsWithProbe.length > parseResult.data.limit;
-    const events = hasMore ? eventsWithProbe.slice(0, parseResult.data.limit) : eventsWithProbe;
-    const nextBefore = hasMore ? events[events.length - 1]?.createdAt : undefined;
+    const events = (
+      hasMore ? eventsWithProbe.slice(0, parseResult.data.limit) : eventsWithProbe
+    ).map(toItemAuditEvent);
+    const nextBefore =
+      hasMore && events[events.length - 1]
+        ? createItemAuditCursor(events[events.length - 1])
+        : undefined;
 
     return response.status(200).json({
       itemId: item.id,
@@ -513,6 +588,58 @@ export function createApp() {
         error: {
           code: "INVALID_PICK",
           message: error instanceof Error ? error.message : "Invalid pick input.",
+        },
+      });
+    }
+  });
+
+  app.post("/items/:itemId/cycle-counts", requireAdminRole, async (request, response) => {
+    const itemId = parseItemIdParam(request.params.itemId);
+
+    if (!itemId) {
+      return response.status(400).json({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Invalid item id path parameter.",
+        },
+      });
+    }
+
+    const item = await findItemById(itemId);
+
+    if (!item) {
+      return response.status(404).json({
+        error: {
+          code: "ITEM_NOT_FOUND",
+          message: "Item not found.",
+        },
+      });
+    }
+
+    const parseResult = cycleCountSchema.safeParse(request.body);
+
+    if (!parseResult.success) {
+      return response.status(400).json({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Invalid cycle count payload.",
+          details: parseResult.error.flatten(),
+        },
+      });
+    }
+
+    try {
+      const countResult = await conductCycleCount({
+        itemId: item.id,
+        ...parseResult.data,
+      });
+
+      return response.status(200).json(countResult);
+    } catch (error) {
+      return response.status(400).json({
+        error: {
+          code: "INVALID_CYCLE_COUNT",
+          message: error instanceof Error ? error.message : "Invalid cycle count input.",
         },
       });
     }

@@ -134,7 +134,9 @@ export function Dashboard() {
               For local demo mode, set <code>VITE_API_ROLE=admin</code> in{" "}
               <code>apps/web/.env</code>
               and allow <code>http://localhost:5173</code> in the API via{" "}
-              <code>OPSLY_ALLOWED_ORIGINS</code>.
+              <code>OPSLY_ALLOWED_ORIGINS</code>. For bearer-token mode, set{" "}
+              <code>VITE_API_TOKEN</code> and configure matching API tokens in{" "}
+              <code>apps/api/.env</code>.
             </p>
           </section>
         ) : null}

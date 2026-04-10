@@ -32,6 +32,9 @@ jobs:
       - name: Lint workspace
         run: pnpm lint
 
+      - name: Typecheck workspace
+        run: pnpm typecheck
+
       - name: Check formatting
         run: pnpm format:check
 

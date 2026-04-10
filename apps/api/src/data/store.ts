@@ -5,6 +5,8 @@ import type { CreateItemInput, Item, StockMovement } from "@opsly/shared";
 const itemStore = new Map<string, Item>();
 const movementStore = new Map<string, StockMovement[]>();
 
+export const DUPLICATE_SKU_ERROR_MESSAGE = "An item with this SKU already exists.";
+
 type DataBackend = "memory" | "postgres";
 
 const DATA_BACKEND: DataBackend =
@@ -109,7 +111,40 @@ function mapMovementRow(row: QueryResultRow): StockMovement {
   };
 }
 
+function normalizeSkuLookupValue(sku: string): string {
+  return sku.trim().toLowerCase();
+}
+
+async function getItemRecordBySku(sku: string): Promise<Item | undefined> {
+  const normalizedSku = normalizeSkuLookupValue(sku);
+
+  if (DATA_BACKEND === "postgres") {
+    await ensurePostgresSchema();
+
+    const postgresPool = requirePool();
+    const result = await postgresPool.query(`SELECT * FROM items WHERE LOWER(sku) = $1 LIMIT 1`, [
+      normalizedSku,
+    ]);
+
+    if (result.rowCount === 0) {
+      return undefined;
+    }
+
+    return mapItemRow(result.rows[0]);
+  }
+
+  return Array.from(itemStore.values()).find(
+    (item) => normalizeSkuLookupValue(item.sku) === normalizedSku,
+  );
+}
+
 export async function createItemRecord(input: CreateItemInput): Promise<Item> {
+  const existingItem = await getItemRecordBySku(input.sku);
+
+  if (existingItem) {
+    throw new Error(DUPLICATE_SKU_ERROR_MESSAGE);
+  }
+
   if (DATA_BACKEND === "postgres") {
     await ensurePostgresSchema();
 

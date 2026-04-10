@@ -9,12 +9,14 @@ The project is meant to feel like a believable internal tool for a warehouse, di
 ### Backend
 
 - Item catalog basics: create, list, fetch by id
+- Duplicate SKU protection for item creation, including case-insensitive and trimmed input handling
 - Stock adjustments with reason codes and inventory guardrails
 - Inbound receipts that increase stock
 - Outbound picks that decrease stock
+- Cycle count workflow: submit a physical count, system computes variance, updates stock, and writes an audit movement (zero-variance counts record too)
 - Reorder-threshold updates without recreating items
 - Per-item movement history
-- Per-item audit feed with cursor-style pagination metadata
+- Per-item audit feed with stable cursor-style pagination metadata
 - Low-stock alert reporting from reorder thresholds
 - Inventory mismatch investigation summary with ranking and filters
 - Operations dashboard summary for inventory health and recent activity
@@ -33,6 +35,7 @@ The project is meant to feel like a believable internal tool for a warehouse, di
   - `/investigations/inventory-mismatch`
   - `/dashboard/operations-summary`
 - Bearer-token auth as the secure runtime default
+- No hardcoded fallback bearer tokens in runtime auth resolution
 - Explicit local demo mode for `x-opsly-role` via `OPSLY_AUTH_MODE=role-header`
 - Auth source surfaced in response headers for easier debugging
 
@@ -53,13 +56,16 @@ The project is meant to feel like a believable internal tool for a warehouse, di
 
 - Shared TypeScript types for items, roles, movements, investigations, dashboard summaries, and audit responses
 - Single contract layer used by both backend and frontend to reduce type drift
+- Audit response contract aligned across API payloads, shared types, and frontend rendering
 
 ### Quality And Tooling
 
 - Workspace build/test flow with pnpm workspaces
-- Backend coverage for health, auth, low-stock alerts, adjustments, receipts, picks, audit history, reorder-threshold updates, dashboard summaries, and mismatch investigations
+- Single-command local quality gate via `pnpm check`
+- Explicit workspace `typecheck` script in addition to build/test scripts
+- Backend coverage for health, auth, item creation, low-stock alerts, adjustments, receipts, picks, cycle counts, audit history, reorder-threshold updates, dashboard summaries, and mismatch investigations
 - ESLint and Prettier wired at the workspace level
-- GitHub Actions CI for build and test verification
+- GitHub Actions CI for lint, typecheck, formatting, build, and test verification
 
 ## API Surface
 
@@ -74,6 +80,7 @@ Current API routes:
 - `POST /items/:itemId/adjustments` - create stock adjustment (admin)
 - `POST /items/:itemId/receipts` - receive stock (admin)
 - `POST /items/:itemId/picks` - pick stock (admin)
+- `POST /items/:itemId/cycle-counts` - submit a physical cycle count (admin)
 - `GET /items/:itemId/movements` - list movement history
 - `GET /items/:itemId/audit` - list audit events (admin)
 - `GET /alerts/low-stock` - low-stock watchlist
@@ -84,29 +91,29 @@ Current API routes:
 
 ```text
 apps/
-	api/
-		.env.example
-		package.json
-		src/
-			data/
-			domain/
-			middleware/
-			index.ts
-			server.ts
-		test/
-	web/
-		.env.example
-		package.json
-		src/
-			api.ts
-			App.tsx
-			Dashboard.tsx
-			ItemDetail.tsx
-			main.tsx
+  api/
+    .env.example
+    package.json
+    src/
+      data/
+      domain/
+      middleware/
+      index.ts
+      server.ts
+    test/
+  web/
+    .env.example
+    package.json
+    src/
+      api.ts
+      App.tsx
+      Dashboard.tsx
+      ItemDetail.tsx
+      main.tsx
 packages/
-	shared/
-		package.json
-		src/
+  shared/
+    package.json
+    src/
 ```
 
 ## Tech Stack
@@ -170,10 +177,22 @@ Run workspace linting:
 pnpm lint
 ```
 
+Run workspace type checking:
+
+```powershell
+pnpm typecheck
+```
+
 Check formatting:
 
 ```powershell
 pnpm format:check
+```
+
+Run the full local quality gate:
+
+```powershell
+pnpm check
 ```
 
 ## Local Environment Setup
@@ -191,9 +210,11 @@ The frontend calls the API from the browser, so the API must explicitly allow th
 
 1. Copy `apps/web/.env.example` to `apps/web/.env`.
 2. Set `VITE_API_BASE_URL=http://localhost:3000`.
-3. Choose one auth option:
-   - Demo role-header mode: set `VITE_API_ROLE=admin`
-   - Bearer-token mode: set `VITE_API_TOKEN=<admin-token>` and omit `VITE_API_ROLE`
+3. Choose one auth option.
+
+Demo role-header mode: set `VITE_API_ROLE=admin`
+
+Bearer-token mode: set `VITE_API_TOKEN=<admin-token>` and omit `VITE_API_ROLE`
 
 This keeps browser access explicit and avoids permissive default CORS behavior.
 
@@ -214,8 +235,8 @@ If `OPSLY_DATA_BACKEND` is unset or set to `memory`, Opsly uses in-memory persis
 Configure tokens:
 
 ```powershell
-$env:OPSLY_ADMIN_TOKEN="opsly-admin-dev-token"
-$env:OPSLY_VIEWER_TOKEN="opsly-viewer-dev-token"
+$env:OPSLY_ADMIN_TOKEN="replace-with-a-unique-admin-token"
+$env:OPSLY_VIEWER_TOKEN="replace-with-a-unique-viewer-token"
 ```
 
 Write endpoints require an admin role. Example header:
@@ -232,16 +253,27 @@ Current automated backend coverage includes:
 
 - Authorization behavior
 - Health and status endpoints
+- Item creation safeguards, including duplicate SKU rejection
 - Low-stock alerts
 - Stock adjustments
 - Stock receipts
 - Stock picks
+- Cycle count workflows
 - Reorder-threshold updates
 - Item audit history
 - Inventory mismatch investigation summary
 - Operations dashboard summary
+- Audit cursor stability and invalid-cursor validation
 
-The backend test suite currently passes with 98 tests.
+Workspace quality gates:
+
+- `pnpm typecheck` for explicit TypeScript validation across `apps/*` and `packages/*`
+- `pnpm lint` for ESLint checks
+- `pnpm format:check` for Prettier verification
+- `pnpm test` for automated test execution
+- `pnpm check` to run the main local quality gate sequence in one command
+
+CI runs lint, typecheck, formatting checks, build, and tests on pushes to `main` and on pull requests.
 
 ## Current Focus
 
@@ -253,6 +285,9 @@ Recently completed:
 - Local runtime fixes for frontend/API connectivity and env loading
 - API root response for easier local verification
 - Auth hardening with secure bearer-only runtime default and explicit demo-mode opt-in
+- Duplicate SKU protection for item creation
+- Stable audit cursor handling for item audit pagination
+- Explicit workspace quality gates and CI parity for lint, typecheck, formatting, build, and tests
 
 Next priorities:
 

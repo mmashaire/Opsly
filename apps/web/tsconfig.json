@@ -1,8 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "paths": {
+      "@opsly/shared": ["../../packages/shared/src/index.ts"]
+    }
   },
   "include": ["src"]
 }

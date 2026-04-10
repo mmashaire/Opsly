@@ -51,6 +51,26 @@ export interface CreateStockPickInput {
   orderReference?: string;
 }
 
+export interface CreateCycleCountInput {
+  itemId: ItemId;
+  countedQuantity: number;
+  note?: string;
+  performedBy?: string;
+}
+
+export interface CycleCountVariance {
+  // Positive means more found than recorded; negative means shrinkage.
+  delta: number;
+  countedQuantity: number;
+  previousQuantity: number;
+}
+
+export interface CycleCountResult {
+  item: Item;
+  movement: StockMovement;
+  variance: CycleCountVariance;
+}
+
 export interface StockMovement {
   id: string;
   itemId: ItemId;
@@ -113,12 +133,15 @@ export interface ItemAuditEvent {
   id: string;
   itemId: ItemId;
   eventType: "CREATED" | "STOCK_MODIFIED" | "REORDER_THRESHOLD_UPDATED";
+  movementType?: StockMovement["type"];
   delta?: number;
   quantityBefore?: number;
   quantityAfter?: number;
   reasonCode?: AdjustmentReasonCode;
   note?: string;
   performedBy?: string;
+  supplierReference?: string;
+  orderReference?: string;
   createdAt: string;
 }
 

@@ -25,6 +25,24 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
 
+function getAuditEventLabel(event: ItemAuditEvent): string {
+  if (event.eventType !== "STOCK_MODIFIED") {
+    return event.eventType === "REORDER_THRESHOLD_UPDATED"
+      ? "Reorder threshold updated"
+      : "Item created";
+  }
+
+  if (event.movementType === "RECEIPT") {
+    return "Stock received";
+  }
+
+  if (event.movementType === "PICK") {
+    return "Stock picked";
+  }
+
+  return "Stock adjusted";
+}
+
 export function ItemDetail() {
   const navigate = useNavigate();
   const params = useParams<{ itemId: string }>();
@@ -320,11 +338,7 @@ export function ItemDetail() {
                       >
                         <div>
                           <strong style={{ display: "block", marginBottom: "0.25rem" }}>
-                            {event.eventType === "STOCK_MODIFIED"
-                              ? `Stock modified`
-                              : event.eventType === "REORDER_THRESHOLD_UPDATED"
-                                ? "Reorder threshold updated"
-                                : "Item created"}
+                            {getAuditEventLabel(event)}
                           </strong>
                           {event.eventType === "STOCK_MODIFIED" && (
                             <p style={{ margin: "0.25rem 0", fontSize: "0.9rem" }}>
@@ -355,6 +369,16 @@ export function ItemDetail() {
                           {event.reasonCode && (
                             <p style={{ margin: "0.25rem 0", fontSize: "0.9rem", color: "#666" }}>
                               Reason: <strong>{event.reasonCode}</strong>
+                            </p>
+                          )}
+                          {event.orderReference && (
+                            <p style={{ margin: "0.25rem 0", fontSize: "0.9rem", color: "#666" }}>
+                              Order: <strong>{event.orderReference}</strong>
+                            </p>
+                          )}
+                          {event.supplierReference && (
+                            <p style={{ margin: "0.25rem 0", fontSize: "0.9rem", color: "#666" }}>
+                              Supplier: <strong>{event.supplierReference}</strong>
                             </p>
                           )}
                           {event.note && (

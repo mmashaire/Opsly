@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearItemStore, clearMovementStore } from "../src/data/store";
 import { createApp } from "../src/index";
 
+const ADMIN_HEADERS = { "x-opsly-role": "admin" };
+
 describe("authorization", () => {
   const previousAdminToken = process.env.OPSLY_ADMIN_TOKEN;
   const previousViewerToken = process.env.OPSLY_VIEWER_TOKEN;
@@ -176,6 +178,29 @@ describe("authorization", () => {
     });
   });
 
+  it("blocks the item audit endpoint for viewer role", async () => {
+    const app = createApp();
+
+    const itemResponse = await request(app).post("/items").set(ADMIN_HEADERS).send({
+      sku: "SKU-AUTH-550",
+      name: "Audit access item",
+      unit: "each",
+      quantityOnHand: 4,
+    });
+
+    const itemId = itemResponse.body.id;
+
+    const auditResponse = await request(app).get(`/items/${itemId}/audit`);
+
+    expect(auditResponse.status).toBe(403);
+    expect(auditResponse.body).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Admin role is required for this operation.",
+      },
+    });
+  });
+
   it("keeps low-stock alerts readable by viewer role", async () => {
     const app = createApp();
 
@@ -235,5 +260,83 @@ describe("authorization", () => {
     expect(response.status).toBe(201);
     expect(response.headers["x-opsly-role"]).toBe("admin");
     expect(response.headers["x-opsly-auth-source"]).toBe("bearer");
+  });
+
+  it("allows sensitive read endpoints in bearer-only mode with a valid admin bearer token", async () => {
+    process.env.OPSLY_AUTH_MODE = "bearer-only";
+    const app = createApp();
+
+    const itemResponse = await request(app)
+      .post("/items")
+      .set("authorization", "Bearer test-admin-token")
+      .send({
+        sku: "SKU-AUTH-850",
+        name: "Bearer audit item",
+        unit: "each",
+        quantityOnHand: 5,
+      });
+
+    const itemId = itemResponse.body.id;
+
+    const [dashboardResponse, investigationsResponse, auditResponse] = await Promise.all([
+      request(app)
+        .get("/dashboard/operations-summary")
+        .set("authorization", "Bearer test-admin-token"),
+      request(app)
+        .get("/investigations/inventory-mismatch")
+        .set("authorization", "Bearer test-admin-token"),
+      request(app).get(`/items/${itemId}/audit`).set("authorization", "Bearer test-admin-token"),
+    ]);
+
+    expect(dashboardResponse.status).toBe(200);
+    expect(dashboardResponse.headers["x-opsly-role"]).toBe("admin");
+    expect(dashboardResponse.headers["x-opsly-auth-source"]).toBe("bearer");
+
+    expect(investigationsResponse.status).toBe(200);
+    expect(investigationsResponse.headers["x-opsly-role"]).toBe("admin");
+    expect(investigationsResponse.headers["x-opsly-auth-source"]).toBe("bearer");
+
+    expect(auditResponse.status).toBe(200);
+    expect(auditResponse.headers["x-opsly-role"]).toBe("admin");
+    expect(auditResponse.headers["x-opsly-auth-source"]).toBe("bearer");
+  });
+
+  it("blocks sensitive read endpoints in bearer-only mode for a viewer bearer token", async () => {
+    process.env.OPSLY_AUTH_MODE = "bearer-only";
+    const app = createApp();
+
+    const itemResponse = await request(app)
+      .post("/items")
+      .set("authorization", "Bearer test-admin-token")
+      .send({
+        sku: "SKU-AUTH-900",
+        name: "Viewer bearer restricted item",
+        unit: "each",
+        quantityOnHand: 3,
+      });
+
+    const itemId = itemResponse.body.id;
+
+    const [dashboardResponse, investigationsResponse, auditResponse] = await Promise.all([
+      request(app)
+        .get("/dashboard/operations-summary")
+        .set("authorization", "Bearer test-viewer-token"),
+      request(app)
+        .get("/investigations/inventory-mismatch")
+        .set("authorization", "Bearer test-viewer-token"),
+      request(app).get(`/items/${itemId}/audit`).set("authorization", "Bearer test-viewer-token"),
+    ]);
+
+    for (const response of [dashboardResponse, investigationsResponse, auditResponse]) {
+      expect(response.status).toBe(403);
+      expect(response.headers["x-opsly-role"]).toBe("viewer");
+      expect(response.headers["x-opsly-auth-source"]).toBe("bearer");
+      expect(response.body).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message: "Admin role is required for this operation.",
+        },
+      });
+    }
   });
 });
