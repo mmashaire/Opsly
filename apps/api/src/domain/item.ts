@@ -167,12 +167,31 @@ export async function listItems(): Promise<Item[]> {
   return listItemRecords();
 }
 
+function compareLowStockUrgency(left: Item, right: Item): number {
+  const leftThreshold = left.reorderThreshold ?? 0;
+  const rightThreshold = right.reorderThreshold ?? 0;
+  const leftShortage = leftThreshold - left.quantityOnHand;
+  const rightShortage = rightThreshold - right.quantityOnHand;
+
+  if (rightShortage !== leftShortage) {
+    return rightShortage - leftShortage;
+  }
+
+  if (left.quantityOnHand !== right.quantityOnHand) {
+    return left.quantityOnHand - right.quantityOnHand;
+  }
+
+  return left.sku.localeCompare(right.sku);
+}
+
 export async function listLowStockItems(): Promise<Item[]> {
   const items = await listItemRecords();
 
-  return items.filter(
-    (item) => item.reorderThreshold !== undefined && item.quantityOnHand <= item.reorderThreshold,
-  );
+  return items
+    .filter(
+      (item) => item.reorderThreshold !== undefined && item.quantityOnHand <= item.reorderThreshold,
+    )
+    .sort(compareLowStockUrgency);
 }
 
 export async function findItemById(itemId: string): Promise<Item | undefined> {

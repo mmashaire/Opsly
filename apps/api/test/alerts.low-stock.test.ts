@@ -100,4 +100,41 @@ describe("low stock alerts", () => {
       reorderThreshold: 2,
     });
   });
+
+  it("sorts low-stock items by urgency", async () => {
+    const app = createApp();
+
+    await request(app).post("/items").set(ADMIN_HEADERS).send({
+      sku: "SKU-A-610",
+      name: "Box cutter blades",
+      unit: "pack",
+      quantityOnHand: 6,
+      reorderThreshold: 10,
+    });
+
+    await request(app).post("/items").set(ADMIN_HEADERS).send({
+      sku: "SKU-A-620",
+      name: "Thermal labels",
+      unit: "roll",
+      quantityOnHand: 0,
+      reorderThreshold: 8,
+    });
+
+    await request(app).post("/items").set(ADMIN_HEADERS).send({
+      sku: "SKU-A-630",
+      name: "Void fill paper",
+      unit: "roll",
+      quantityOnHand: 3,
+      reorderThreshold: 5,
+    });
+
+    const response = await request(app).get("/alerts/low-stock");
+
+    expect(response.status).toBe(200);
+    expect(response.body.map((item: { sku: string }) => item.sku)).toEqual([
+      "SKU-A-620",
+      "SKU-A-610",
+      "SKU-A-630",
+    ]);
+  });
 });

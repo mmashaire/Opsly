@@ -18,6 +18,7 @@ The project is meant to feel like a believable internal tool for a warehouse, di
 - Per-item movement history
 - Per-item audit feed with stable cursor-style pagination metadata
 - Low-stock alert reporting from reorder thresholds
+- Low-stock watchlist ordering by urgency so the most constrained items surface first
 - Inventory mismatch investigation summary with ranking and filters
 - Operations dashboard summary for inventory health and recent activity
 - API status route at `/` and health check at `/health`
@@ -25,6 +26,7 @@ The project is meant to feel like a believable internal tool for a warehouse, di
 - Request tracing with `x-request-id`
 - Structured request logging with request id, auth source, role, and duration
 - Strict browser-origin allowlist via `OPSLY_ALLOWED_ORIGINS`
+- Optional startup demo-data seeding for local walkthroughs
 - Optional persistence backend toggle: in-memory or PostgreSQL
 
 ### Authorization And Access Control
@@ -43,9 +45,9 @@ The project is meant to feel like a believable internal tool for a warehouse, di
 
 - Dashboard-first warehouse operations UI in `apps/web`
 - Live inventory health view backed by the API
-- Low-stock watchlist for replenishment pressure
+- Low-stock watchlist for replenishment pressure with actionable empty-state guidance
 - Inventory mismatch investigation table for adjustment-driven risk
-- Item inventory table for current operational visibility
+- Item inventory table for current operational visibility with stable SKU ordering
 - Item detail page with full movement history and audit timeline
 - Client-side routing between dashboard and item detail pages
 - Loading, not-found, and error states for dashboard and item-detail flows
@@ -205,6 +207,7 @@ The frontend calls the API from the browser, so the API must explicitly allow th
 2. Set `OPSLY_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174`.
 3. For browser demo mode, set `OPSLY_AUTH_MODE=role-header`.
 4. Leave `OPSLY_DATA_BACKEND=memory` for the default in-memory experience.
+5. To open the app with believable data instead of an empty dashboard, set `OPSLY_SEED_DEMO_DATA=true`.
 
 ### Frontend Demo Setup
 
@@ -255,6 +258,7 @@ Current automated backend coverage includes:
 - Health and status endpoints
 - Item creation safeguards, including duplicate SKU rejection
 - Low-stock alerts
+- Low-stock watchlist urgency ordering
 - Stock adjustments
 - Stock receipts
 - Stock picks
@@ -264,6 +268,8 @@ Current automated backend coverage includes:
 - Inventory mismatch investigation summary
 - Operations dashboard summary
 - Audit cursor stability and invalid-cursor validation
+- Demo-data seeding behavior
+- Stable item register ordering by SKU
 
 Workspace quality gates:
 
@@ -288,6 +294,8 @@ Recently completed:
 - Duplicate SKU protection for item creation
 - Stable audit cursor handling for item audit pagination
 - Explicit workspace quality gates and CI parity for lint, typecheck, formatting, build, and tests
+- Optional startup demo-data seeding for local walkthroughs
+- Low-stock urgency ordering and a more actionable empty dashboard experience
 
 Next priorities:
 

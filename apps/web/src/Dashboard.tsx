@@ -143,6 +143,25 @@ export function Dashboard() {
 
         {state.status === "ready" ? (
           <>
+            {state.data.dashboard.inventory.totalItems === 0 ? (
+              <section className="status-panel">
+                <h2>No warehouse activity loaded yet</h2>
+                <p>
+                  Opsly is connected to the live API, but the current environment has no inventory
+                  records yet.
+                </p>
+                <p>
+                  For a realistic local walkthrough, set <code>OPSLY_SEED_DEMO_DATA=true</code> in{" "}
+                  <code>apps/api/.env</code> and restart the API. That will load demo inventory,
+                  receipts, picks, low-stock pressure, and investigation candidates.
+                </p>
+                <p>
+                  If you want a clean environment instead, leave seeding disabled and create items
+                  through the API first.
+                </p>
+              </section>
+            ) : null}
+
             <section className="metrics-grid">
               <MetricCard
                 label="Tracked items"
@@ -210,7 +229,11 @@ export function Dashboard() {
                 </div>
                 <div className="compact-list">
                   {state.data.lowStockItems.length === 0 ? (
-                    <p className="empty-copy">No low-stock items right now.</p>
+                    <p className="empty-copy">
+                      {state.data.dashboard.inventory.totalItems === 0
+                        ? "No inventory has been loaded yet. Seed demo data or create items to populate this watchlist."
+                        : "No low-stock items right now."}
+                    </p>
                   ) : (
                     state.data.lowStockItems.slice(0, 6).map((item) => (
                       <button
@@ -242,7 +265,9 @@ export function Dashboard() {
                 </div>
                 {state.data.investigation.items.length === 0 ? (
                   <p className="empty-copy">
-                    No items crossed the current investigation threshold.
+                    {state.data.dashboard.inventory.totalItems === 0
+                      ? "No inventory movements are loaded yet, so there are no mismatch candidates to review."
+                      : "No items crossed the current investigation threshold."}
                   </p>
                 ) : (
                   <div className="table-wrap">
@@ -288,40 +313,47 @@ export function Dashboard() {
                     <h2>Current item positions</h2>
                   </div>
                 </div>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>SKU</th>
-                        <th>Name</th>
-                        <th>Unit</th>
-                        <th>On hand</th>
-                        <th>Reorder threshold</th>
-                        <th>Updated</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {state.data.items.map((item) => (
-                        <tr
-                          key={item.id}
-                          style={{ cursor: "pointer" }}
-                          onClick={() => navigate(`/items/${encodeURIComponent(item.id)}`)}
-                        >
-                          <td>{item.sku}</td>
-                          <td>{item.name}</td>
-                          <td>{item.unit}</td>
-                          <td>{formatNumber(item.quantityOnHand)}</td>
-                          <td>
-                            {item.reorderThreshold === undefined
-                              ? "-"
-                              : formatNumber(item.reorderThreshold)}
-                          </td>
-                          <td>{formatDateTime(item.updatedAt)}</td>
+                {state.data.items.length === 0 ? (
+                  <p className="empty-copy">
+                    No items exist yet. Enable demo seeding in <code>apps/api/.env</code> or add
+                    inventory records through the API to populate the register.
+                  </p>
+                ) : (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>SKU</th>
+                          <th>Name</th>
+                          <th>Unit</th>
+                          <th>On hand</th>
+                          <th>Reorder threshold</th>
+                          <th>Updated</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {state.data.items.map((item) => (
+                          <tr
+                            key={item.id}
+                            style={{ cursor: "pointer" }}
+                            onClick={() => navigate(`/items/${encodeURIComponent(item.id)}`)}
+                          >
+                            <td>{item.sku}</td>
+                            <td>{item.name}</td>
+                            <td>{item.unit}</td>
+                            <td>{formatNumber(item.quantityOnHand)}</td>
+                            <td>
+                              {item.reorderThreshold === undefined
+                                ? "-"
+                                : formatNumber(item.reorderThreshold)}
+                            </td>
+                            <td>{formatDateTime(item.updatedAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </article>
             </section>
           </>

@@ -62,4 +62,38 @@ describe("item creation", () => {
     expect(duplicateResponse.status).toBe(409);
     expect(duplicateResponse.body.error.code).toBe("DUPLICATE_SKU");
   });
+
+  it("lists items in SKU order for a stable inventory register", async () => {
+    const app = createApp();
+
+    await request(app).post("/items").set(ADMIN_HEADERS).send({
+      sku: "SKU-C-300",
+      name: "Void fill",
+      unit: "bag",
+      quantityOnHand: 2,
+    });
+
+    await request(app).post("/items").set(ADMIN_HEADERS).send({
+      sku: "SKU-C-100",
+      name: "Carton",
+      unit: "each",
+      quantityOnHand: 5,
+    });
+
+    await request(app).post("/items").set(ADMIN_HEADERS).send({
+      sku: "SKU-C-200",
+      name: "Tape",
+      unit: "roll",
+      quantityOnHand: 8,
+    });
+
+    const response = await request(app).get("/items");
+
+    expect(response.status).toBe(200);
+    expect(response.body.map((item: { sku: string }) => item.sku)).toEqual([
+      "SKU-C-100",
+      "SKU-C-200",
+      "SKU-C-300",
+    ]);
+  });
 });

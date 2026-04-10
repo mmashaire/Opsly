@@ -115,6 +115,19 @@ function normalizeSkuLookupValue(sku: string): string {
   return sku.trim().toLowerCase();
 }
 
+function compareItemsBySku(left: Item, right: Item): number {
+  const normalizedLeftSku = normalizeSkuLookupValue(left.sku);
+  const normalizedRightSku = normalizeSkuLookupValue(right.sku);
+
+  const normalizedComparison = normalizedLeftSku.localeCompare(normalizedRightSku);
+
+  if (normalizedComparison !== 0) {
+    return normalizedComparison;
+  }
+
+  return left.sku.localeCompare(right.sku);
+}
+
 async function getItemRecordBySku(sku: string): Promise<Item | undefined> {
   const normalizedSku = normalizeSkuLookupValue(sku);
 
@@ -205,12 +218,12 @@ export async function listItemRecords(): Promise<Item[]> {
     await ensurePostgresSchema();
 
     const postgresPool = requirePool();
-    const result = await postgresPool.query(`SELECT * FROM items ORDER BY created_at ASC`);
+    const result = await postgresPool.query(`SELECT * FROM items ORDER BY LOWER(sku) ASC, sku ASC`);
 
     return result.rows.map(mapItemRow);
   }
 
-  return Array.from(itemStore.values());
+  return Array.from(itemStore.values()).sort(compareItemsBySku);
 }
 
 export async function getItemRecordById(itemId: string): Promise<Item | undefined> {
