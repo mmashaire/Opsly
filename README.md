@@ -65,7 +65,7 @@ The project is meant to feel like a believable internal tool for a warehouse, di
 - Workspace build/test flow with pnpm workspaces
 - Single-command local quality gate via `pnpm check`
 - Explicit workspace `typecheck` script in addition to build/test scripts
-- Backend coverage for health, auth, item creation, low-stock alerts, adjustments, receipts, picks, cycle counts, audit history, reorder-threshold updates, dashboard summaries, and mismatch investigations
+- Backend coverage for health, auth, item creation, item retrieval, low-stock alerts, adjustments, receipts, picks, cycle counts, audit history, reorder-threshold updates, dashboard summaries, and mismatch investigations
 - ESLint and Prettier wired at the workspace level
 - GitHub Actions CI for lint, typecheck, formatting, build, and test verification
 
