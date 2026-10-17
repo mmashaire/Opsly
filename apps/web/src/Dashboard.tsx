@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
   InventoryInvestigationSummary,
@@ -40,6 +40,8 @@ function formatNumber(value: number): string {
 export function Dashboard() {
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [inventorySearchQuery, setInventorySearchQuery] = useState("");
+  const deferredInventorySearchQuery = useDeferredValue(inventorySearchQuery);
 
   useEffect(() => {
     let isActive = true;
@@ -90,6 +92,18 @@ export function Dashboard() {
 
   const authMode = getConfiguredAuthMode();
   const apiBaseUrl = getApiBaseUrl();
+  const normalizedInventorySearchQuery = deferredInventorySearchQuery.trim().toLowerCase();
+  const filteredItems =
+    state.status === "ready"
+      ? state.data.items.filter((item) => {
+          if (!normalizedInventorySearchQuery) {
+            return true;
+          }
+
+          const searchableText = `${item.sku} ${item.name}`.toLowerCase();
+          return searchableText.includes(normalizedInventorySearchQuery);
+        })
+      : [];
 
   return (
     <div className="app-shell">
@@ -312,11 +326,28 @@ export function Dashboard() {
                     <p className="panel-kicker">Inventory register</p>
                     <h2>Current item positions</h2>
                   </div>
+                  {state.data.items.length > 0 ? (
+                    <label className="panel-filter">
+                      <span>Filter by SKU or name</span>
+                      <input
+                        className="panel-filter-input"
+                        onChange={(event) => setInventorySearchQuery(event.target.value)}
+                        placeholder="Search inventory"
+                        type="search"
+                        value={inventorySearchQuery}
+                      />
+                    </label>
+                  ) : null}
                 </div>
                 {state.data.items.length === 0 ? (
                   <p className="empty-copy">
                     No items exist yet. Enable demo seeding in <code>apps/api/.env</code> or add
                     inventory records through the API to populate the register.
+                  </p>
+                ) : filteredItems.length === 0 ? (
+                  <p className="empty-copy">
+                    No items match <code>{inventorySearchQuery}</code>. Try a SKU fragment or part
+                    of the item name.
                   </p>
                 ) : (
                   <div className="table-wrap">
@@ -332,7 +363,7 @@ export function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {state.data.items.map((item) => (
+                        {filteredItems.map((item) => (
                           <tr
                             key={item.id}
                             style={{ cursor: "pointer" }}

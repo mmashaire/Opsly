@@ -1,7 +1,23 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { Item, ItemAuditEvent, StockMovement } from "@opsly/shared";
-import { fetchItemById, fetchItemMovements, fetchItemAudit } from "./api";
+import type { AdjustmentReasonCode, Item, ItemAuditEvent, StockMovement } from "@opsly/shared";
+import {
+  createStockAdjustment,
+  createStockPick,
+  createStockReceipt,
+  fetchItemById,
+  fetchItemMovements,
+  fetchItemAudit,
+} from "./api";
+
+type StockAction = "receipt" | "pick" | "adjustment";
+
+const adjustmentReasonCodes: AdjustmentReasonCode[] = [
+  "CYCLE_COUNT",
+  "DAMAGE",
+  "MANUAL_CORRECTION",
+  "RECEIVING_CORRECTION",
+];
 
 type LoadState =
   | { status: "loading" }
@@ -48,6 +64,111 @@ export function ItemDetail() {
   const params = useParams<{ itemId: string }>();
   const itemId = params.itemId;
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [stockAction, setStockAction] = useState<StockAction>("receipt");
+  const [quantityInput, setQuantityInput] = useState("1");
+  const [reasonCode, setReasonCode] = useState<AdjustmentReasonCode>("CYCLE_COUNT");
+  const [note, setNote] = useState("");
+  const [performedBy, setPerformedBy] = useState("");
+  const [reference, setReference] = useState("");
+  const [actionPending, setActionPending] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [actionSuccess, setActionSuccess] = useState("");
+
+  async function handleStockActionSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!itemId || state.status !== "ready") {
+      return;
+    }
+
+    const enteredQuantity = Number(quantityInput);
+    const isAdjustment = stockAction === "adjustment";
+
+    if (
+      !Number.isInteger(enteredQuantity) ||
+      (isAdjustment ? enteredQuantity === 0 : enteredQuantity <= 0)
+    ) {
+      setActionError(
+        isAdjustment
+          ? "Enter a non-zero whole-number adjustment."
+          : "Enter a positive whole-number quantity.",
+      );
+      setActionSuccess("");
+      return;
+    }
+
+    setActionPending(true);
+    setActionError("");
+    setActionSuccess("");
+
+    try {
+      const optionalDetails = {
+        ...(note.trim() ? { note: note.trim() } : {}),
+        ...(performedBy.trim() ? { performedBy: performedBy.trim() } : {}),
+      };
+      const actionResult =
+        stockAction === "receipt"
+          ? await createStockReceipt(itemId, {
+              quantityReceived: enteredQuantity,
+              ...optionalDetails,
+              ...(reference.trim() ? { supplierReference: reference.trim() } : {}),
+            })
+          : stockAction === "pick"
+            ? await createStockPick(itemId, {
+                quantityPicked: enteredQuantity,
+                ...optionalDetails,
+                ...(reference.trim() ? { orderReference: reference.trim() } : {}),
+              })
+            : await createStockAdjustment(itemId, {
+                delta: enteredQuantity,
+                reasonCode,
+                ...optionalDetails,
+              });
+
+      setState((currentState) =>
+        currentState.status === "ready"
+          ? {
+              ...currentState,
+              item: actionResult.item,
+              movements: [
+                actionResult.movement,
+                ...currentState.movements.filter(
+                  (movement) => movement.id !== actionResult.movement.id,
+                ),
+              ],
+            }
+          : currentState,
+      );
+      setActionSuccess(
+        `${stockAction === "receipt" ? "Receipt" : stockAction === "pick" ? "Pick" : "Adjustment"} recorded.`,
+      );
+      setQuantityInput("1");
+      setNote("");
+      setReference("");
+
+      try {
+        const [item, movements, auditResponse] = await Promise.all([
+          fetchItemById(itemId),
+          fetchItemMovements(itemId),
+          fetchItemAudit(itemId, 50),
+        ]);
+
+        setState((currentState) =>
+          currentState.status === "ready"
+            ? { ...currentState, item, movements, auditEvents: auditResponse.events }
+            : currentState,
+        );
+      } catch {
+        setActionSuccess("Action recorded. Reload this page to refresh the audit timeline.");
+      }
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Stock action could not be recorded.",
+      );
+    } finally {
+      setActionPending(false);
+    }
+  }
 
   useEffect(() => {
     if (!itemId) {
@@ -164,6 +285,106 @@ export function ItemDetail() {
 
         {state.status === "ready" ? (
           <section className="dashboard-grid">
+            <article className="panel panel-wide stock-action-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="panel-kicker">Record stock movement</p>
+                  <h2>Update inventory</h2>
+                </div>
+              </div>
+              <div className="stock-action-modes" role="group" aria-label="Stock action">
+                {(["receipt", "pick", "adjustment"] as const).map((action) => (
+                  <button
+                    aria-pressed={stockAction === action}
+                    className={
+                      stockAction === action ? "stock-action-mode active" : "stock-action-mode"
+                    }
+                    key={action}
+                    onClick={() => {
+                      setStockAction(action);
+                      setActionError("");
+                      setActionSuccess("");
+                    }}
+                    type="button"
+                  >
+                    {action === "receipt" ? "Receive" : action === "pick" ? "Pick" : "Adjust"}
+                  </button>
+                ))}
+              </div>
+              <form className="stock-action-form" onSubmit={handleStockActionSubmit}>
+                <label>
+                  <span>{stockAction === "adjustment" ? "Quantity change" : "Quantity"}</span>
+                  <input
+                    min={stockAction === "adjustment" ? undefined : 1}
+                    onChange={(event) => setQuantityInput(event.target.value)}
+                    required
+                    step="1"
+                    type="number"
+                    value={quantityInput}
+                  />
+                </label>
+                {stockAction === "adjustment" ? (
+                  <label>
+                    <span>Reason</span>
+                    <select
+                      onChange={(event) =>
+                        setReasonCode(event.target.value as AdjustmentReasonCode)
+                      }
+                      value={reasonCode}
+                    >
+                      {adjustmentReasonCodes.map((code) => (
+                        <option key={code} value={code}>
+                          {code.replaceAll("_", " ")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {stockAction !== "adjustment" ? (
+                  <label>
+                    <span>
+                      {stockAction === "receipt" ? "Supplier reference" : "Order reference"}
+                    </span>
+                    <input
+                      onChange={(event) => setReference(event.target.value)}
+                      value={reference}
+                    />
+                  </label>
+                ) : null}
+                <label>
+                  <span>Performed by</span>
+                  <input
+                    onChange={(event) => setPerformedBy(event.target.value)}
+                    value={performedBy}
+                  />
+                </label>
+                <label className="stock-action-note">
+                  <span>Note</span>
+                  <textarea
+                    onChange={(event) => setNote(event.target.value)}
+                    rows={2}
+                    value={note}
+                  />
+                </label>
+                <div className="stock-action-footer">
+                  <p
+                    aria-live="polite"
+                    className={actionError ? "action-feedback error" : "action-feedback"}
+                  >
+                    {actionError || actionSuccess}
+                  </p>
+                  <button className="stock-action-submit" disabled={actionPending} type="submit">
+                    {actionPending
+                      ? "Recording..."
+                      : stockAction === "receipt"
+                        ? "Record receipt"
+                        : stockAction === "pick"
+                          ? "Record pick"
+                          : "Record adjustment"}
+                  </button>
+                </div>
+              </form>
+            </article>
             <article className="panel panel-wide">
               <div className="panel-header">
                 <div>

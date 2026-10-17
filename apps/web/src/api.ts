@@ -1,4 +1,8 @@
 import type {
+  AdjustmentReasonCode,
+  CreateStockAdjustmentInput,
+  CreateStockPickInput,
+  CreateStockReceiptInput,
   InventoryInvestigationSummary,
   Item,
   ItemAuditResponse,
@@ -43,6 +47,31 @@ async function fetchJson<T>(path: string): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      ...buildHeaders(),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => undefined)) as ApiErrorPayload | undefined;
+    const message = payload?.error?.message || `Request failed with status ${response.status}.`;
+
+    throw new Error(message);
+  }
+
+  return (await response.json()) as T;
+}
+
+interface StockActionResult {
+  item: Item;
+  movement: StockMovement;
 }
 
 export function getApiBaseUrl(): string {
@@ -101,4 +130,25 @@ export async function fetchItemAudit(
   return fetchJson<ItemAuditResponse>(
     `/items/${encodeURIComponent(itemId)}/audit?${params.toString()}`,
   );
+}
+
+export async function createStockReceipt(
+  itemId: string,
+  input: Omit<CreateStockReceiptInput, "itemId">,
+): Promise<StockActionResult> {
+  return postJson<StockActionResult>(`/items/${encodeURIComponent(itemId)}/receipts`, input);
+}
+
+export async function createStockPick(
+  itemId: string,
+  input: Omit<CreateStockPickInput, "itemId">,
+): Promise<StockActionResult> {
+  return postJson<StockActionResult>(`/items/${encodeURIComponent(itemId)}/picks`, input);
+}
+
+export async function createStockAdjustment(
+  itemId: string,
+  input: Omit<CreateStockAdjustmentInput, "itemId"> & { reasonCode: AdjustmentReasonCode },
+): Promise<StockActionResult> {
+  return postJson<StockActionResult>(`/items/${encodeURIComponent(itemId)}/adjustments`, input);
 }
