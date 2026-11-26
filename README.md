@@ -23,9 +23,25 @@ distinguished from generic adjustments and are not included. Accuracy is unavail
 one count is recorded in the reporting period. PostgreSQL calculates the report aggregates in SQL;
 the in-memory backend uses the same metric definitions.
 
+Use the report to spot repeated count variances and prioritize follow-up on items with shortages or
+surplus. It is an operational signal, not a root-cause analysis or an inventory valuation.
+
+Cycle-count stock updates and movement records are currently separate writes, without a PostgreSQL
+transaction or row-level locking. A failed movement insert or concurrent stock change could leave
+the on-hand balance and count history out of sync; this demo is not ready for concurrent production
+inventory workflows.
+
 Item movement history, audit history, and operational reports require the admin role because
 movement details can contain operator names and operational notes. Item and low-stock reads remain
 available to viewers.
+
+## Demo screenshots
+
+These screenshots use fictional data loaded by the local demo seed.
+
+![Opsly dashboard with cycle-count accuracy, low-stock watchlist, and inventory register](docs/screenshots/opsly-dashboard.png)
+
+![Item detail with a recorded cycle-count movement and variance](docs/screenshots/opsly-cycle-count-history.png)
 
 ## Run locally
 
@@ -33,8 +49,12 @@ You need Node.js 22 and pnpm 10. From the project folder, install dependencies a
 
 ```powershell
 pnpm install
-Copy-Item apps/api/.env.example apps/api/.env
-Copy-Item apps/web/.env.example apps/web/.env
+if (-not (Test-Path apps/api/.env)) {
+  Copy-Item apps/api/.env.example apps/api/.env
+}
+if (-not (Test-Path apps/web/.env)) {
+  Copy-Item apps/web/.env.example apps/web/.env
+}
 ```
 
 For a local demo, set these values in `apps/api/.env`:
