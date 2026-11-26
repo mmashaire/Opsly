@@ -1,8 +1,11 @@
 import type {
   AdjustmentReasonCode,
   CreateStockAdjustmentInput,
+  CreateCycleCountInput,
+  CycleCountResult,
   CreateStockPickInput,
   CreateStockReceiptInput,
+  CycleCountAccuracySummary,
   InventoryInvestigationSummary,
   Item,
   ItemAuditResponse,
@@ -110,6 +113,10 @@ export async function fetchInvestigationSummary(): Promise<InventoryInvestigatio
   );
 }
 
+export async function fetchCycleCountAccuracySummary(): Promise<CycleCountAccuracySummary> {
+  return fetchJson<CycleCountAccuracySummary>("/reports/cycle-count-accuracy?periodDays=30");
+}
+
 export async function fetchItemById(itemId: string): Promise<Item> {
   return fetchJson<Item>(`/items/${encodeURIComponent(itemId)}`);
 }
@@ -151,4 +158,11 @@ export async function createStockAdjustment(
   input: Omit<CreateStockAdjustmentInput, "itemId"> & { reasonCode: AdjustmentReasonCode },
 ): Promise<StockActionResult> {
   return postJson<StockActionResult>(`/items/${encodeURIComponent(itemId)}/adjustments`, input);
+}
+
+export async function createCycleCount(
+  itemId: string,
+  input: Omit<CreateCycleCountInput, "itemId">,
+): Promise<CycleCountResult> {
+  return postJson<CycleCountResult>(`/items/${encodeURIComponent(itemId)}/cycle-counts`, input);
 }

@@ -6,10 +6,26 @@ Opsly is a warehouse inventory app. It helps a team see stock, record stock chan
 
 - Shows inventory, low-stock items, and recent activity.
 - Records receipts, picks, and stock adjustments from an item page.
+- Records physical cycle counts and reports count accuracy, shortages, and surplus by item.
 - Shows an item's movement and audit history.
 - Highlights items that may need an inventory investigation.
 
-Stock is tracked per item, not by warehouse location or bin.
+## Current scope
+
+Stock is tracked as one aggregate balance per item, not by warehouse location or bin. The current
+app does not model multiple warehouses, customer-specific WMS configuration, or external system
+integrations. Location/bin-level inventory is the next major domain step.
+
+The admin report `GET /reports/cycle-count-accuracy?periodDays=30` measures the share of physical
+counts that exactly matched the recorded quantity. It uses explicit cycle-count events, not ordinary
+adjustments; historical counts recorded before this event type was introduced cannot be
+distinguished from generic adjustments and are not included. Accuracy is unavailable until at least
+one count is recorded in the reporting period. PostgreSQL calculates the report aggregates in SQL;
+the in-memory backend uses the same metric definitions.
+
+Item movement history, audit history, and operational reports require the admin role because
+movement details can contain operator names and operational notes. Item and low-stock reads remain
+available to viewers.
 
 ## Run locally
 

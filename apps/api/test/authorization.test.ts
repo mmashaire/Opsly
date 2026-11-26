@@ -160,6 +160,7 @@ describe("authorization", () => {
 
     const investigationsResponse = await request(app).get("/investigations/inventory-mismatch");
     const dashboardResponse = await request(app).get("/dashboard/operations-summary");
+    const reportResponse = await request(app).get("/reports/cycle-count-accuracy");
 
     expect(investigationsResponse.status).toBe(403);
     expect(investigationsResponse.body).toEqual({
@@ -168,6 +169,9 @@ describe("authorization", () => {
         message: "Admin role is required for this operation.",
       },
     });
+
+    expect(reportResponse.status).toBe(403);
+    expect(reportResponse.body.error.code).toBe("FORBIDDEN");
 
     expect(dashboardResponse.status).toBe(403);
     expect(dashboardResponse.body).toEqual({
@@ -178,7 +182,7 @@ describe("authorization", () => {
     });
   });
 
-  it("blocks the item audit endpoint for viewer role", async () => {
+  it("blocks item movement and audit endpoints for viewer role", async () => {
     const app = createApp();
 
     const itemResponse = await request(app).post("/items").set(ADMIN_HEADERS).send({
@@ -190,14 +194,48 @@ describe("authorization", () => {
 
     const itemId = itemResponse.body.id;
 
-    const auditResponse = await request(app).get(`/items/${itemId}/audit`);
+    const [movementsResponse, auditResponse] = await Promise.all([
+      request(app).get(`/items/${itemId}/movements`),
+      request(app).get(`/items/${itemId}/audit`),
+    ]);
 
+    expect(movementsResponse.status).toBe(403);
     expect(auditResponse.status).toBe(403);
-    expect(auditResponse.body).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Admin role is required for this operation.",
-      },
+    for (const response of [movementsResponse, auditResponse]) {
+      expect(response.body).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message: "Admin role is required for this operation.",
+        },
+      });
+    }
+  });
+
+  it("allows admins to read cycle-count details from movement history", async () => {
+    const app = createApp();
+
+    const itemResponse = await request(app).post("/items").set(ADMIN_HEADERS).send({
+      sku: "SKU-AUTH-560",
+      name: "Movement privacy item",
+      unit: "each",
+      quantityOnHand: 4,
+    });
+
+    const itemId = itemResponse.body.id;
+
+    await request(app).post(`/items/${itemId}/cycle-counts`).set(ADMIN_HEADERS).send({
+      countedQuantity: 3,
+      performedBy: "test_operator",
+      note: "Counted in restricted test fixture.",
+    });
+
+    const response = await request(app).get(`/items/${itemId}/movements`).set(ADMIN_HEADERS);
+
+    expect(response.status).toBe(200);
+    expect(response.body[0]).toMatchObject({
+      type: "CYCLE_COUNT",
+      performedBy: "test_operator",
+      note: "Counted in restricted test fixture.",
     });
   });
 
@@ -278,14 +316,26 @@ describe("authorization", () => {
 
     const itemId = itemResponse.body.id;
 
-    const [dashboardResponse, investigationsResponse, auditResponse] = await Promise.all([
+    const [
+      dashboardResponse,
+      investigationsResponse,
+      movementsResponse,
+      auditResponse,
+      reportResponse,
+    ] = await Promise.all([
       request(app)
         .get("/dashboard/operations-summary")
         .set("authorization", "Bearer test-admin-token"),
       request(app)
         .get("/investigations/inventory-mismatch")
         .set("authorization", "Bearer test-admin-token"),
+      request(app)
+        .get(`/items/${itemId}/movements`)
+        .set("authorization", "Bearer test-admin-token"),
       request(app).get(`/items/${itemId}/audit`).set("authorization", "Bearer test-admin-token"),
+      request(app)
+        .get("/reports/cycle-count-accuracy")
+        .set("authorization", "Bearer test-admin-token"),
     ]);
 
     expect(dashboardResponse.status).toBe(200);
@@ -296,9 +346,11 @@ describe("authorization", () => {
     expect(investigationsResponse.headers["x-opsly-role"]).toBe("admin");
     expect(investigationsResponse.headers["x-opsly-auth-source"]).toBe("bearer");
 
-    expect(auditResponse.status).toBe(200);
-    expect(auditResponse.headers["x-opsly-role"]).toBe("admin");
-    expect(auditResponse.headers["x-opsly-auth-source"]).toBe("bearer");
+    for (const response of [movementsResponse, auditResponse, reportResponse]) {
+      expect(response.status).toBe(200);
+      expect(response.headers["x-opsly-role"]).toBe("admin");
+      expect(response.headers["x-opsly-auth-source"]).toBe("bearer");
+    }
   });
 
   it("blocks sensitive read endpoints in bearer-only mode for a viewer bearer token", async () => {
@@ -317,17 +369,35 @@ describe("authorization", () => {
 
     const itemId = itemResponse.body.id;
 
-    const [dashboardResponse, investigationsResponse, auditResponse] = await Promise.all([
+    const [
+      dashboardResponse,
+      investigationsResponse,
+      movementsResponse,
+      auditResponse,
+      reportResponse,
+    ] = await Promise.all([
       request(app)
         .get("/dashboard/operations-summary")
         .set("authorization", "Bearer test-viewer-token"),
       request(app)
         .get("/investigations/inventory-mismatch")
         .set("authorization", "Bearer test-viewer-token"),
+      request(app)
+        .get(`/items/${itemId}/movements`)
+        .set("authorization", "Bearer test-viewer-token"),
       request(app).get(`/items/${itemId}/audit`).set("authorization", "Bearer test-viewer-token"),
+      request(app)
+        .get("/reports/cycle-count-accuracy")
+        .set("authorization", "Bearer test-viewer-token"),
     ]);
 
-    for (const response of [dashboardResponse, investigationsResponse, auditResponse]) {
+    for (const response of [
+      dashboardResponse,
+      investigationsResponse,
+      movementsResponse,
+      auditResponse,
+      reportResponse,
+    ]) {
       expect(response.status).toBe(403);
       expect(response.headers["x-opsly-role"]).toBe("viewer");
       expect(response.headers["x-opsly-auth-source"]).toBe("bearer");

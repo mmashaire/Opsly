@@ -46,7 +46,9 @@ describe("item stock adjustments", () => {
       performedBy: "shift_lead",
     });
 
-    const movementResponse = await request(app).get(`/items/${itemId}/movements`);
+    const movementResponse = await request(app)
+      .get(`/items/${itemId}/movements`)
+      .set(ADMIN_HEADERS);
 
     expect(movementResponse.status).toBe(200);
     expect(movementResponse.body).toHaveLength(1);
@@ -177,7 +179,9 @@ describe("item stock adjustments", () => {
       reasonCode: "CYCLE_COUNT",
     });
 
-    const movementResponse = await request(app).get(`/items/${itemId}/movements`);
+    const movementResponse = await request(app)
+      .get(`/items/${itemId}/movements`)
+      .set(ADMIN_HEADERS);
 
     expect(movementResponse.status).toBe(200);
     expect(movementResponse.body).toHaveLength(2);

@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type QueryResultRow } from "pg";
-import type { CreateItemInput, Item, StockMovement } from "@opsly/shared";
+import type {
+  CreateItemInput,
+  CycleCountAccuracyItemSummary,
+  Item,
+  StockMovement,
+} from "@opsly/shared";
 
 const itemStore = new Map<string, Item>();
 const movementStore = new Map<string, StockMovement[]>();
 
 export const DUPLICATE_SKU_ERROR_MESSAGE = "An item with this SKU already exists.";
+
+export type CycleCountAccuracyAggregate = Omit<CycleCountAccuracyItemSummary, "accuracyPercent">;
 
 type DataBackend = "memory" | "postgres";
 
@@ -64,6 +71,11 @@ async function ensurePostgresSchema(): Promise<void> {
           order_reference TEXT,
           created_at TIMESTAMPTZ NOT NULL
         );
+      `);
+
+      await postgresPool.query(`
+        CREATE INDEX IF NOT EXISTS stock_movements_type_created_at_idx
+        ON stock_movements (type, created_at);
       `);
     })();
   }
@@ -395,6 +407,131 @@ export async function listMovementRecordsByItemId(itemId: string): Promise<Stock
   }
 
   return movementStore.get(itemId) ?? [];
+}
+
+export async function listAllMovementRecords(): Promise<StockMovement[]> {
+  if (DATA_BACKEND === "postgres") {
+    await ensurePostgresSchema();
+
+    const postgresPool = requirePool();
+    const result = await postgresPool.query(
+      `SELECT * FROM stock_movements ORDER BY created_at ASC, id ASC`,
+    );
+
+    return result.rows.map(mapMovementRow);
+  }
+
+  return Array.from(movementStore.values())
+    .flat()
+    .sort((left, right) => {
+      const createdAtCompare = left.createdAt.localeCompare(right.createdAt);
+      return createdAtCompare !== 0 ? createdAtCompare : left.id.localeCompare(right.id);
+    });
+}
+
+export async function listCycleCountAccuracyAggregates(
+  periodStart: Date,
+  periodEnd: Date,
+): Promise<CycleCountAccuracyAggregate[]> {
+  if (DATA_BACKEND === "postgres") {
+    await ensurePostgresSchema();
+
+    const postgresPool = requirePool();
+    const result = await postgresPool.query(
+      `
+      SELECT
+        i.id AS item_id,
+        i.sku,
+        i.name,
+        COUNT(*)::INTEGER AS count_count,
+        COUNT(*) FILTER (WHERE movement.delta = 0)::INTEGER AS exact_count_count,
+        COUNT(*) FILTER (WHERE movement.delta <> 0)::INTEGER AS variance_count,
+        COALESCE(SUM(-movement.delta) FILTER (WHERE movement.delta < 0), 0) AS shortage_units,
+        COALESCE(SUM(movement.delta) FILTER (WHERE movement.delta > 0), 0) AS surplus_units,
+        COALESCE(SUM(ABS(movement.delta)), 0) AS absolute_variance_units,
+        MAX(movement.created_at) AS latest_count_at
+      FROM stock_movements AS movement
+      JOIN items AS i ON i.id = movement.item_id
+      WHERE movement.type = 'CYCLE_COUNT'
+        AND movement.created_at >= $1
+        AND movement.created_at <= $2
+      GROUP BY i.id, i.sku, i.name
+      `,
+      [periodStart.toISOString(), periodEnd.toISOString()],
+    );
+
+    return result.rows.map((row) => ({
+      itemId: String(row.item_id),
+      sku: String(row.sku),
+      name: String(row.name),
+      countCount: Number(row.count_count),
+      exactCountCount: Number(row.exact_count_count),
+      varianceCount: Number(row.variance_count),
+      shortageUnits: Number(row.shortage_units),
+      surplusUnits: Number(row.surplus_units),
+      absoluteVarianceUnits: Number(row.absolute_variance_units),
+      latestCountAt: new Date(String(row.latest_count_at)).toISOString(),
+    }));
+  }
+
+  const periodStartTime = periodStart.getTime();
+  const periodEndTime = periodEnd.getTime();
+  const itemsById = new Map(Array.from(itemStore.values(), (item) => [item.id, item]));
+  const aggregatesByItemId = new Map<string, CycleCountAccuracyAggregate>();
+
+  for (const movement of Array.from(movementStore.values()).flat()) {
+    if (movement.type !== "CYCLE_COUNT") {
+      continue;
+    }
+
+    const countTime = Date.parse(movement.createdAt);
+
+    if (Number.isNaN(countTime) || countTime < periodStartTime || countTime > periodEndTime) {
+      continue;
+    }
+
+    const item = itemsById.get(movement.itemId);
+
+    if (!item) {
+      continue;
+    }
+
+    const aggregate = aggregatesByItemId.get(item.id) ?? {
+      itemId: item.id,
+      sku: item.sku,
+      name: item.name,
+      countCount: 0,
+      exactCountCount: 0,
+      varianceCount: 0,
+      shortageUnits: 0,
+      surplusUnits: 0,
+      absoluteVarianceUnits: 0,
+      latestCountAt: movement.createdAt,
+    };
+
+    aggregate.countCount += 1;
+    if (movement.delta === 0) {
+      aggregate.exactCountCount += 1;
+    } else {
+      aggregate.varianceCount += 1;
+    }
+
+    if (movement.delta < 0) {
+      aggregate.shortageUnits += Math.abs(movement.delta);
+    } else if (movement.delta > 0) {
+      aggregate.surplusUnits += movement.delta;
+    }
+
+    aggregate.absoluteVarianceUnits += Math.abs(movement.delta);
+
+    if (movement.createdAt > aggregate.latestCountAt) {
+      aggregate.latestCountAt = movement.createdAt;
+    }
+
+    aggregatesByItemId.set(item.id, aggregate);
+  }
+
+  return Array.from(aggregatesByItemId.values());
 }
 
 export function clearItemStore(): void {

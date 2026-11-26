@@ -42,7 +42,7 @@ describe("cycle counts", () => {
     });
     expect(countResponse.body.movement).toMatchObject({
       itemId,
-      type: "ADJUSTMENT",
+      type: "CYCLE_COUNT",
       delta: -3,
       quantityBefore: 20,
       quantityAfter: 17,
@@ -105,11 +105,13 @@ describe("cycle counts", () => {
     });
 
     // A zero-variance count should still appear in movement history.
-    const movementResponse = await request(app).get(`/items/${itemId}/movements`);
+    const movementResponse = await request(app)
+      .get(`/items/${itemId}/movements`)
+      .set(ADMIN_HEADERS);
     expect(movementResponse.status).toBe(200);
     expect(movementResponse.body).toHaveLength(1);
     expect(movementResponse.body[0]).toMatchObject({
-      type: "ADJUSTMENT",
+      type: "CYCLE_COUNT",
       reasonCode: "CYCLE_COUNT",
       delta: 0,
     });

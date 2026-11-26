@@ -74,7 +74,7 @@ export interface CycleCountResult {
 export interface StockMovement {
   id: string;
   itemId: ItemId;
-  type: "ADJUSTMENT" | "RECEIPT" | "PICK";
+  type: "ADJUSTMENT" | "CYCLE_COUNT" | "RECEIPT" | "PICK";
   delta: number;
   quantityBefore: number;
   quantityAfter: number;
@@ -106,6 +106,34 @@ export interface InventoryInvestigationSummary {
   items: InventoryInvestigationItemSummary[];
 }
 
+export interface CycleCountAccuracyItemSummary {
+  itemId: string;
+  sku: string;
+  name: string;
+  countCount: number;
+  exactCountCount: number;
+  varianceCount: number;
+  accuracyPercent: number;
+  shortageUnits: number;
+  surplusUnits: number;
+  absoluteVarianceUnits: number;
+  latestCountAt: string;
+}
+
+export interface CycleCountAccuracySummary {
+  generatedAt: string;
+  periodDays: number;
+  totalCountCount: number;
+  exactCountCount: number;
+  varianceCount: number;
+  accuracyPercent: number | null;
+  itemsCounted: number;
+  shortageUnits: number;
+  surplusUnits: number;
+  absoluteVarianceUnits: number;
+  items: CycleCountAccuracyItemSummary[];
+}
+
 export interface OperationsDashboardSummary {
   generatedAt: string;
   periodDays: number;
@@ -120,6 +148,7 @@ export interface OperationsDashboardSummary {
     receiptMovementCount: number;
     pickMovementCount: number;
     adjustmentMovementCount: number;
+    cycleCountMovementCount: number;
     unitsReceived: number;
     unitsPicked: number;
     netStockChange: number;

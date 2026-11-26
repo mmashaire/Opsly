@@ -1,12 +1,14 @@
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
+  CycleCountAccuracySummary,
   InventoryInvestigationSummary,
   Item,
   OperationsDashboardSummary,
 } from "@opsly/shared";
 import {
   fetchDashboardSummary,
+  fetchCycleCountAccuracySummary,
   fetchInvestigationSummary,
   fetchItems,
   fetchLowStockItems,
@@ -16,6 +18,7 @@ import {
 
 interface AppData {
   dashboard: OperationsDashboardSummary;
+  cycleCountAccuracy: CycleCountAccuracySummary;
   lowStockItems: Item[];
   items: Item[];
   investigation: InventoryInvestigationSummary;
@@ -37,6 +40,10 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
 
+function formatPercent(value: number): string {
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -48,12 +55,14 @@ export function Dashboard() {
 
     async function load() {
       try {
-        const [dashboard, lowStockItems, items, investigation] = await Promise.all([
-          fetchDashboardSummary(),
-          fetchLowStockItems(),
-          fetchItems(),
-          fetchInvestigationSummary(),
-        ]);
+        const [dashboard, cycleCountAccuracy, lowStockItems, items, investigation] =
+          await Promise.all([
+            fetchDashboardSummary(),
+            fetchCycleCountAccuracySummary(),
+            fetchLowStockItems(),
+            fetchItems(),
+            fetchInvestigationSummary(),
+          ]);
 
         if (!isActive) {
           return;
@@ -64,6 +73,7 @@ export function Dashboard() {
             status: "ready",
             data: {
               dashboard,
+              cycleCountAccuracy,
               lowStockItems,
               items,
               investigation,
@@ -227,11 +237,89 @@ export function Dashboard() {
                     detail={`Net stock change ${formatNumber(state.data.dashboard.activity.netStockChange)}`}
                   />
                   <ActivityStat
+                    label="Cycle counts"
+                    value={formatNumber(state.data.dashboard.activity.cycleCountMovementCount)}
+                    detail="Physical counts recorded"
+                  />
+                  <ActivityStat
                     label="Out of stock"
                     value={formatNumber(state.data.dashboard.inventory.outOfStockItemCount)}
                     detail="Items currently at zero on hand"
                   />
                 </div>
+              </article>
+
+              <article className="panel panel-wide">
+                <div className="panel-header">
+                  <div>
+                    <p className="panel-kicker">Continuous improvement</p>
+                    <h2>Cycle count accuracy · last 30 days</h2>
+                  </div>
+                </div>
+                <div className="activity-grid">
+                  <ActivityStat
+                    label="Count accuracy"
+                    value={
+                      state.data.cycleCountAccuracy.accuracyPercent === null
+                        ? "No counts"
+                        : formatPercent(state.data.cycleCountAccuracy.accuracyPercent)
+                    }
+                    detail={
+                      state.data.cycleCountAccuracy.accuracyPercent === null
+                        ? "No physical counts in this period"
+                        : `${formatNumber(state.data.cycleCountAccuracy.exactCountCount)} exact of ${formatNumber(state.data.cycleCountAccuracy.totalCountCount)} counts`
+                    }
+                  />
+                  <ActivityStat
+                    label="Items counted"
+                    value={formatNumber(state.data.cycleCountAccuracy.itemsCounted)}
+                    detail={`${formatNumber(state.data.cycleCountAccuracy.totalCountCount)} count events`}
+                  />
+                  <ActivityStat
+                    label="Absolute variance"
+                    value={formatNumber(state.data.cycleCountAccuracy.absoluteVarianceUnits)}
+                    detail={`${formatNumber(state.data.cycleCountAccuracy.shortageUnits)} shortage · ${formatNumber(state.data.cycleCountAccuracy.surplusUnits)} surplus`}
+                  />
+                </div>
+                {state.data.cycleCountAccuracy.items.length === 0 ? (
+                  <p className="empty-copy">
+                    No cycle counts were recorded in the last 30 days. Count accuracy will appear
+                    after physical counts are entered.
+                  </p>
+                ) : (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th>Counts</th>
+                          <th>Accuracy</th>
+                          <th>Shortage</th>
+                          <th>Surplus</th>
+                          <th>Last counted</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {state.data.cycleCountAccuracy.items.slice(0, 6).map((item) => (
+                          <tr
+                            key={item.itemId}
+                            onClick={() => navigate(`/items/${encodeURIComponent(item.itemId)}`)}
+                          >
+                            <td>
+                              <strong>{item.name}</strong>
+                              <div className="table-subtle">{item.sku}</div>
+                            </td>
+                            <td>{formatNumber(item.countCount)}</td>
+                            <td>{formatPercent(item.accuracyPercent)}</td>
+                            <td>{formatNumber(item.shortageUnits)}</td>
+                            <td>{formatNumber(item.surplusUnits)}</td>
+                            <td>{formatDateTime(item.latestCountAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </article>
 
               <article className="panel">

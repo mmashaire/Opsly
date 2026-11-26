@@ -111,7 +111,9 @@ describe("item stock receipts", () => {
       reasonCode: "CYCLE_COUNT",
     });
 
-    const movementResponse = await request(app).get(`/items/${itemId}/movements`);
+    const movementResponse = await request(app)
+      .get(`/items/${itemId}/movements`)
+      .set(ADMIN_HEADERS);
 
     expect(movementResponse.status).toBe(200);
     expect(movementResponse.body).toHaveLength(2);

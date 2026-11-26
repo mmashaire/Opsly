@@ -2,6 +2,7 @@ import { startTransition, useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { AdjustmentReasonCode, Item, ItemAuditEvent, StockMovement } from "@opsly/shared";
 import {
+  createCycleCount,
   createStockAdjustment,
   createStockPick,
   createStockReceipt,
@@ -10,10 +11,9 @@ import {
   fetchItemAudit,
 } from "./api";
 
-type StockAction = "receipt" | "pick" | "adjustment";
+type StockAction = "receipt" | "pick" | "adjustment" | "cycle-count";
 
 const adjustmentReasonCodes: AdjustmentReasonCode[] = [
-  "CYCLE_COUNT",
   "DAMAGE",
   "MANUAL_CORRECTION",
   "RECEIVING_CORRECTION",
@@ -56,6 +56,10 @@ function getAuditEventLabel(event: ItemAuditEvent): string {
     return "Stock picked";
   }
 
+  if (event.movementType === "CYCLE_COUNT") {
+    return "Cycle count completed";
+  }
+
   return "Stock adjusted";
 }
 
@@ -66,7 +70,7 @@ export function ItemDetail() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [stockAction, setStockAction] = useState<StockAction>("receipt");
   const [quantityInput, setQuantityInput] = useState("1");
-  const [reasonCode, setReasonCode] = useState<AdjustmentReasonCode>("CYCLE_COUNT");
+  const [reasonCode, setReasonCode] = useState<AdjustmentReasonCode>("DAMAGE");
   const [note, setNote] = useState("");
   const [performedBy, setPerformedBy] = useState("");
   const [reference, setReference] = useState("");
@@ -83,15 +87,22 @@ export function ItemDetail() {
 
     const enteredQuantity = Number(quantityInput);
     const isAdjustment = stockAction === "adjustment";
+    const isCycleCount = stockAction === "cycle-count";
 
     if (
       !Number.isInteger(enteredQuantity) ||
-      (isAdjustment ? enteredQuantity === 0 : enteredQuantity <= 0)
+      (isAdjustment
+        ? enteredQuantity === 0
+        : isCycleCount
+          ? enteredQuantity < 0
+          : enteredQuantity <= 0)
     ) {
       setActionError(
         isAdjustment
           ? "Enter a non-zero whole-number adjustment."
-          : "Enter a positive whole-number quantity.",
+          : isCycleCount
+            ? "Enter a non-negative whole-number physical count."
+            : "Enter a positive whole-number quantity.",
       );
       setActionSuccess("");
       return;
@@ -119,11 +130,16 @@ export function ItemDetail() {
                 ...optionalDetails,
                 ...(reference.trim() ? { orderReference: reference.trim() } : {}),
               })
-            : await createStockAdjustment(itemId, {
-                delta: enteredQuantity,
-                reasonCode,
-                ...optionalDetails,
-              });
+            : stockAction === "adjustment"
+              ? await createStockAdjustment(itemId, {
+                  delta: enteredQuantity,
+                  reasonCode,
+                  ...optionalDetails,
+                })
+              : await createCycleCount(itemId, {
+                  countedQuantity: enteredQuantity,
+                  ...optionalDetails,
+                });
 
       setState((currentState) =>
         currentState.status === "ready"
@@ -140,7 +156,7 @@ export function ItemDetail() {
           : currentState,
       );
       setActionSuccess(
-        `${stockAction === "receipt" ? "Receipt" : stockAction === "pick" ? "Pick" : "Adjustment"} recorded.`,
+        `${stockAction === "receipt" ? "Receipt" : stockAction === "pick" ? "Pick" : stockAction === "cycle-count" ? "Cycle count" : "Adjustment"} recorded.`,
       );
       setQuantityInput("1");
       setNote("");
@@ -293,7 +309,7 @@ export function ItemDetail() {
                 </div>
               </div>
               <div className="stock-action-modes" role="group" aria-label="Stock action">
-                {(["receipt", "pick", "adjustment"] as const).map((action) => (
+                {(["receipt", "pick", "adjustment", "cycle-count"] as const).map((action) => (
                   <button
                     aria-pressed={stockAction === action}
                     className={
@@ -307,15 +323,33 @@ export function ItemDetail() {
                     }}
                     type="button"
                   >
-                    {action === "receipt" ? "Receive" : action === "pick" ? "Pick" : "Adjust"}
+                    {action === "receipt"
+                      ? "Receive"
+                      : action === "pick"
+                        ? "Pick"
+                        : action === "cycle-count"
+                          ? "Cycle count"
+                          : "Adjust"}
                   </button>
                 ))}
               </div>
               <form className="stock-action-form" onSubmit={handleStockActionSubmit}>
                 <label>
-                  <span>{stockAction === "adjustment" ? "Quantity change" : "Quantity"}</span>
+                  <span>
+                    {stockAction === "adjustment"
+                      ? "Quantity change"
+                      : stockAction === "cycle-count"
+                        ? "Counted quantity"
+                        : "Quantity"}
+                  </span>
                   <input
-                    min={stockAction === "adjustment" ? undefined : 1}
+                    min={
+                      stockAction === "adjustment"
+                        ? undefined
+                        : stockAction === "cycle-count"
+                          ? 0
+                          : 1
+                    }
                     onChange={(event) => setQuantityInput(event.target.value)}
                     required
                     step="1"
@@ -340,7 +374,7 @@ export function ItemDetail() {
                     </select>
                   </label>
                 ) : null}
-                {stockAction !== "adjustment" ? (
+                {stockAction === "receipt" || stockAction === "pick" ? (
                   <label>
                     <span>
                       {stockAction === "receipt" ? "Supplier reference" : "Order reference"}
@@ -380,7 +414,9 @@ export function ItemDetail() {
                         ? "Record receipt"
                         : stockAction === "pick"
                           ? "Record pick"
-                          : "Record adjustment"}
+                          : stockAction === "cycle-count"
+                            ? "Record physical count"
+                            : "Record adjustment"}
                   </button>
                 </div>
               </form>
@@ -468,13 +504,17 @@ export function ItemDetail() {
                                     ? "#d4edda"
                                     : movement.type === "PICK"
                                       ? "#f8d7da"
-                                      : "#e2e3e5",
+                                      : movement.type === "CYCLE_COUNT"
+                                        ? "#d1ecf1"
+                                        : "#e2e3e5",
                                 color:
                                   movement.type === "RECEIPT"
                                     ? "#155724"
                                     : movement.type === "PICK"
                                       ? "#721c24"
-                                      : "#383d41",
+                                      : movement.type === "CYCLE_COUNT"
+                                        ? "#0c5460"
+                                        : "#383d41",
                               }}
                             >
                               {movement.type}

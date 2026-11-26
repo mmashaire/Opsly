@@ -10,6 +10,7 @@ import {
   conductCycleCount,
   createItem,
   findItemById,
+  getCycleCountAccuracySummary,
   getInventoryInvestigationSummary,
   getOperationsDashboardSummary,
   listItemAuditEvents,
@@ -91,6 +92,10 @@ const operationsDashboardQuerySchema = z.object({
   minimumAdjustmentCount: z.coerce.number().int().positive().max(100).default(2),
 });
 
+const cycleCountAccuracyQuerySchema = z.object({
+  periodDays: z.coerce.number().int().positive().max(365).default(30),
+});
+
 function parseItemIdParam(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -104,7 +109,7 @@ function parseItemIdParam(value: unknown): string | undefined {
 function toItemAuditEvent(event: {
   id: string;
   itemId: string;
-  type: "ADJUSTMENT" | "RECEIPT" | "PICK";
+  type: "ADJUSTMENT" | "CYCLE_COUNT" | "RECEIPT" | "PICK";
   delta: number;
   quantityBefore: number;
   quantityAfter: number;
@@ -178,6 +183,26 @@ export function createApp() {
     const summary = await getOperationsDashboardSummary({
       periodDays: parseResult.data.periodDays,
       minimumAdjustmentCount: parseResult.data.minimumAdjustmentCount,
+    });
+
+    return response.status(200).json(summary);
+  });
+
+  app.get("/reports/cycle-count-accuracy", requireAdminRole, async (request, response) => {
+    const parseResult = cycleCountAccuracyQuerySchema.safeParse(request.query);
+
+    if (!parseResult.success) {
+      return response.status(400).json({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Invalid cycle count accuracy query.",
+          details: parseResult.error.flatten(),
+        },
+      });
+    }
+
+    const summary = await getCycleCountAccuracySummary({
+      periodDays: parseResult.data.periodDays,
     });
 
     return response.status(200).json(summary);
@@ -387,7 +412,7 @@ export function createApp() {
     }
   });
 
-  app.get("/items/:itemId/movements", async (request, response) => {
+  app.get("/items/:itemId/movements", requireAdminRole, async (request, response) => {
     const itemId = parseItemIdParam(request.params.itemId);
 
     if (!itemId) {

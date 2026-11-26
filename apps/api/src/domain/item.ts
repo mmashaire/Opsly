@@ -6,6 +6,7 @@ import type {
   CreateStockAdjustmentInput,
   CreateStockReceiptInput,
   CycleCountResult,
+  CycleCountAccuracySummary,
   Item,
   InventoryInvestigationSummary,
   InventoryInvestigationItemSummary,
@@ -17,6 +18,8 @@ import {
   createItemRecord,
   getItemRecordById,
   listItemRecords,
+  listAllMovementRecords,
+  listCycleCountAccuracyAggregates,
   listMovementRecordsByItemId,
   updateItemQuantityRecord,
   updateItemReorderThresholdRecord,
@@ -202,6 +205,66 @@ export async function listItemMovements(itemId: string): Promise<StockMovement[]
   return listMovementRecordsByItemId(itemId);
 }
 
+function toOneDecimalPlace(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+export async function getCycleCountAccuracySummary(input: {
+  periodDays: number;
+}): Promise<CycleCountAccuracySummary> {
+  const now = Date.now();
+  const periodStart = now - input.periodDays * 24 * 60 * 60 * 1000;
+  const aggregates = await listCycleCountAccuracyAggregates(new Date(periodStart), new Date(now));
+
+  let totalCountCount = 0;
+  let exactCountCount = 0;
+  let varianceCount = 0;
+  let shortageUnits = 0;
+  let surplusUnits = 0;
+  let absoluteVarianceUnits = 0;
+
+  for (const aggregate of aggregates) {
+    totalCountCount += aggregate.countCount;
+    exactCountCount += aggregate.exactCountCount;
+    varianceCount += aggregate.varianceCount;
+    shortageUnits += aggregate.shortageUnits;
+    surplusUnits += aggregate.surplusUnits;
+    absoluteVarianceUnits += aggregate.absoluteVarianceUnits;
+  }
+
+  const itemSummaries = aggregates
+    .map((aggregate) => ({
+      ...aggregate,
+      accuracyPercent: toOneDecimalPlace((aggregate.exactCountCount / aggregate.countCount) * 100),
+    }))
+    .sort((left, right) => {
+      if (right.varianceCount !== left.varianceCount) {
+        return right.varianceCount - left.varianceCount;
+      }
+
+      if (right.absoluteVarianceUnits !== left.absoluteVarianceUnits) {
+        return right.absoluteVarianceUnits - left.absoluteVarianceUnits;
+      }
+
+      return left.sku.localeCompare(right.sku);
+    });
+
+  return {
+    generatedAt: new Date(now).toISOString(),
+    periodDays: input.periodDays,
+    totalCountCount,
+    exactCountCount,
+    varianceCount,
+    accuracyPercent:
+      totalCountCount === 0 ? null : toOneDecimalPlace((exactCountCount / totalCountCount) * 100),
+    itemsCounted: itemSummaries.length,
+    shortageUnits,
+    surplusUnits,
+    absoluteVarianceUnits,
+    items: itemSummaries,
+  };
+}
+
 function compareAuditEventsNewestFirst(left: StockMovement, right: StockMovement): number {
   const createdAtCompare = right.createdAt.localeCompare(left.createdAt);
 
@@ -290,13 +353,21 @@ export async function getInventoryInvestigationSummary(input: {
 }): Promise<InventoryInvestigationSummary> {
   const now = Date.now();
   const periodStart = now - input.periodDays * 24 * 60 * 60 * 1000;
-  const items = await listItemRecords();
+  const [items, allMovements] = await Promise.all([listItemRecords(), listAllMovementRecords()]);
+  const movementsByItemId = new Map<string, StockMovement[]>();
+
+  for (const movement of allMovements) {
+    const itemMovements = movementsByItemId.get(movement.itemId) ?? [];
+    itemMovements.push(movement);
+    movementsByItemId.set(movement.itemId, itemMovements);
+  }
+
   const summaries: InventoryInvestigationItemSummary[] = [];
 
   for (const item of items) {
-    const movements = await listMovementRecordsByItemId(item.id);
+    const movements = movementsByItemId.get(item.id) ?? [];
     const recentAdjustments = movements.filter((movement) => {
-      if (movement.type !== "ADJUSTMENT") {
+      if (movement.type !== "ADJUSTMENT" && movement.type !== "CYCLE_COUNT") {
         return false;
       }
 
@@ -410,35 +481,38 @@ export async function getOperationsDashboardSummary(input: {
   let receiptMovementCount = 0;
   let pickMovementCount = 0;
   let adjustmentMovementCount = 0;
+  let cycleCountMovementCount = 0;
   let unitsReceived = 0;
   let unitsPicked = 0;
   let netStockChange = 0;
 
-  for (const item of items) {
-    const movements = await listMovementRecordsByItemId(item.id);
+  const movements = await listAllMovementRecords();
 
-    for (const movement of movements) {
-      const movementCreatedAt = Date.parse(movement.createdAt);
+  for (const movement of movements) {
+    const movementCreatedAt = Date.parse(movement.createdAt);
 
-      if (Number.isNaN(movementCreatedAt) || movementCreatedAt < periodStart) {
-        continue;
-      }
+    if (Number.isNaN(movementCreatedAt) || movementCreatedAt < periodStart) {
+      continue;
+    }
 
-      netStockChange += movement.delta;
+    netStockChange += movement.delta;
 
-      if (movement.type === "RECEIPT") {
-        receiptMovementCount += 1;
-        unitsReceived += movement.delta;
-      }
+    if (movement.type === "RECEIPT") {
+      receiptMovementCount += 1;
+      unitsReceived += movement.delta;
+    }
 
-      if (movement.type === "PICK") {
-        pickMovementCount += 1;
-        unitsPicked += Math.abs(movement.delta);
-      }
+    if (movement.type === "PICK") {
+      pickMovementCount += 1;
+      unitsPicked += Math.abs(movement.delta);
+    }
 
-      if (movement.type === "ADJUSTMENT") {
-        adjustmentMovementCount += 1;
-      }
+    if (movement.type === "ADJUSTMENT") {
+      adjustmentMovementCount += 1;
+    }
+
+    if (movement.type === "CYCLE_COUNT") {
+      cycleCountMovementCount += 1;
     }
   }
 
@@ -461,6 +535,7 @@ export async function getOperationsDashboardSummary(input: {
       receiptMovementCount,
       pickMovementCount,
       adjustmentMovementCount,
+      cycleCountMovementCount,
       unitsReceived,
       unitsPicked,
       netStockChange,
@@ -542,7 +617,7 @@ export async function conductCycleCount(input: CreateCycleCountInput): Promise<C
   const movement = await addMovementRecord({
     id: randomUUID(),
     itemId: item.id,
-    type: "ADJUSTMENT",
+    type: "CYCLE_COUNT",
     delta,
     quantityBefore: previousQuantity,
     quantityAfter: countedQuantity,
